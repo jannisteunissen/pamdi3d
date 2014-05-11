@@ -53,13 +53,6 @@ module m_particle_core
    !> The list that contains all the particles in the simulation
    type(PC_part_t), allocatable :: PC_particles(:)
 
-   type PC_copy_t
-      !> Holds copies of the particles
-      type(PC_part_t), allocatable :: particles(:)
-   end type PC_copy_t
-
-   type(PC_copy_t), allocatable :: PC_copies(:)
-
    interface
       subroutine if_ipart(my_part)
          import
@@ -147,9 +140,6 @@ module m_particle_core
    public :: PC_compute_vector_sum
    public :: PC_sort_particles
    public :: PC_merge_and_split
-   public :: PC_set_num_copies
-   public :: PC_copy_particles_in
-   public :: PC_copy_particles_out
    public :: PC_clean_up_dead
    public :: PC_get_histogram
    public :: PC_vel_to_en
@@ -1012,29 +1002,6 @@ contains
    subroutine PC_reset_coll_count()
       PC_coll%counts(:) = 0
    end subroutine PC_reset_coll_count
-
-   !> Allocate storage for a copy of the particles
-   subroutine PC_set_num_copies(num_copies)
-      integer, intent(in) :: num_copies
-
-      if (allocated(PC_copies)) deallocate(PC_copies)
-
-      if (num_copies > 0) then
-         allocate(PC_copies(num_copies))
-      end if
-   end subroutine PC_set_num_copies
-
-   subroutine PC_copy_particles_out(copy_index)
-      integer, intent(in) :: copy_index
-      ! Allocatable component is automatically allocated
-      PC_copies(copy_index)%particles = PC_particles(1:PC_num_part)
-   end subroutine PC_copy_particles_out
-
-   subroutine PC_copy_particles_in(copy_index)
-      integer, intent(in) :: copy_index
-      PC_num_part = size(PC_copies(copy_index)%particles)
-      PC_particles(1:PC_num_part) = PC_copies(copy_index)%particles
-   end subroutine PC_copy_particles_in
 
    subroutine PC_get_coeffs(coeff_data, coeff_names, n_coeffs)
       use m_cross_sec
