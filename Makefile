@@ -1,5 +1,5 @@
 FC 	:= gfortran
-FFLAGS	:= -Wall -fcheck=all -ffpe-trap=invalid,zero,overflow -g -O3
+FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -fcheck=all -g -O2 -fopenmp
 OBJS	:= m_gas.o m_particle_core.o m_cross_sec.o kdtree2.o
 
 INCDIRS	:= ../fosito

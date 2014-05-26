@@ -1,5 +1,5 @@
 FC 	:= gfortran
-FFLAGS	:= -Wall -fcheck=all -ffpe-trap=invalid,zero,overflow -g -O3
+FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -fcheck=all -g -O2 -fopenmp
 TESTS	:= test_m_particle_core test_m_cross_sec
 
 # Need these libraries for the tests
@@ -17,6 +17,8 @@ LIBDIRS := ../ $(INCDIRS)
 .PHONY: all clean
 
 all: 	$(TESTS)
+
+test:	$(TESTS)
 	$(foreach test, $(TESTS), ./$(test);)
 
 clean:

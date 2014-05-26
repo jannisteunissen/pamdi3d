@@ -4,22 +4,24 @@ program test_m_particle_core
    use m_units_constants
 
    implicit none
+
    integer, parameter :: dp = kind(0.0d0)
    character(len=*), parameter :: cs_file = "test_m_particle_core_cs.txt"
    character(len=*), parameter :: gas_name = "druyv_gas"
 
-   integer, parameter :: max_num_part = 5*1000*1000
-   integer, parameter :: init_num_part = 1000
-   integer, parameter :: max_num_steps = 10
-   integer, parameter :: lkp_tbl_size = 10*1000
-   real(dp), parameter :: delta_t = 1.0e-8_dp
-   real(dp), parameter :: max_en_eV = 1.0e-1_dp
-   real(dp), parameter :: neutral_dens = 2.5e25_dp
-   real(dp), parameter :: part_mass = UC_elec_mass
-   real(dp), parameter :: init_accel(3) = (/0.0_dp, 0.0_dp, 1.0e12_dp/)
-   real(dp) :: norm_cross_sec, mass_ratio
-   real(dp) :: pos(3), vel(3), accel(3), weight
-   integer :: ll, step, num_colls
+   integer, parameter         :: max_num_part  = 100*1000
+   integer, parameter         :: init_num_part = 50*1000
+   integer, parameter         :: max_num_steps = 20
+   integer, parameter         :: lkp_tbl_size  = 1000
+   integer, parameter         :: num_lists = 4
+   real(dp), parameter        :: delta_t       = 1.0e-8_dp
+   real(dp), parameter        :: max_en_eV     = 1.0e-1_dp
+   real(dp), parameter        :: neutral_dens  = 2.5e25_dp
+   real(dp), parameter        :: part_mass     = UC_elec_mass
+   real(dp), parameter        :: init_accel(3) = (/0.0_dp, 0.0_dp, 1.0e12_dp/)
+   real(dp)                   :: norm_cross_sec, mass_ratio
+   real(dp)                   :: pos(3), vel(3), accel(3), weight
+   integer                    :: ll, step, num_colls
    type(CS_type), allocatable :: cross_secs(:)
 
    print *, "Testing m_particle_core.f90 implementation"
@@ -34,8 +36,9 @@ program test_m_particle_core
 
    print *, "Initializing particle module"
    print *, part_mass
-   call PC_initialize(part_mass, cross_secs, lkp_tbl_size, max_en_eV)
-   num_colls = PC_get_num_colls()
+   call PC_initialize(part_mass, cross_secs, lkp_tbl_size, max_en_eV, &
+        max_num_part, num_lists)
+   num_colls = PC_get_num_colls(1)
    deallocate(cross_secs)
 
    print *, "Creating initial particles"
@@ -44,7 +47,7 @@ program test_m_particle_core
       vel = 0.0_dp
       accel = init_accel
       weight = 1
-      call PC_create_part(pos, vel, accel, weight, 0.0_dp)
+      call PC_create_part(pos, vel, accel, weight, 0.0_dp, 1 + mod(ll, num_lists))
    end do
 
    do step = 1, max_num_steps
@@ -55,47 +58,45 @@ program test_m_particle_core
    end do
 
    call print_stats()
-   call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-        1.0e-6_dp, get_weight_2, merge_particles, split_particles)
-   call print_stats()
-   call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-        1.0e-6_dp, get_weight_1, merge_particles, split_particles)
-   call print_stats()
+   ! call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
+   !      1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
+   ! call print_stats()
+   ! call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
+   !      1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
+   ! call print_stats()
 
 contains
 
-   subroutine print_stats()
-      integer :: nn, n_part
-      type(PC_part_t) :: my_part
-      real(dp) :: sum_x(3), sum_v(3), sum_a(3), sum_en
-      real(dp) :: coll_count(num_colls), sum_weight
+   subroutine part_stats(part, vec)
+      type(PC_part_t), intent(in) :: part
+      real(dp), intent(out) :: vec(:)
+      vec(1:3) = part%weight * part%x
+      vec(4:6) = part%weight * part%v
+      vec(7:9) = part%weight * part%a
+      vec(10) = part%weight * PC_v_to_en(part%v)
+      vec(11) = part%weight
+   end subroutine part_stats
 
-      sum_x = 0.0_dp
-      sum_v = 0.0_dp
-      sum_a = 0.0_dp
-      sum_en = 0.0_dp
-      sum_weight = 0.0_dp
+   subroutine print_stats()
+      integer :: n_part
+      real(dp) :: sum_x(3), sum_v(3), sum_a(3), sum_en
+      real(dp) :: sum_weight
+      real(dp) :: sum_vec(11)
 
       n_part = PC_get_num_sim_part()
-      do nn = 1, n_part
-         call PC_get_part(nn, my_part)
-         sum_x = sum_x + my_part%x * my_part%weight
-         sum_v = sum_v + my_part%v * my_part%weight
-         sum_a = sum_a + my_part%a * my_part%weight
-         sum_en = sum_en + sum(my_part%v**2) * my_part%weight
-         sum_weight = sum_weight + my_part%weight
-      end do
+      call PC_compute_vector_sum(part_stats, sum_vec)
+      sum_weight = sum_vec(11)
+      sum_x = sum_vec(1:3)
+      sum_v = sum_vec(4:6)
+      sum_a = sum_vec(7:9)
+      sum_en =  sum_vec(10)
 
-      call PC_get_coll_count(coll_count)
-
-      print *, "mean position", sum_x / sum_weight
-      print *, "mean velocity", sum_v / sum_weight
-      print *, "mean energy (eV)              ", 0.5_dp * part_mass * sum_en / (sum_weight * UC_elec_volt)
+      ! print *, "mean position", sum_x / sum_weight
+      ! print *, "mean velocity", sum_v / sum_weight
+      print *, "mean energy (eV)              ", sum_en / (sum_weight * UC_elec_volt)
       print *, "Druyvesteyn mean energy: (eV) ", 0.5_dp * UC_elec_mass * 0.739669_dp / &
            (sqrt(3*norm_cross_sec**2 * (2 / (1 + 1/mass_ratio)) / (8 * init_accel(3)**2)) *  UC_elec_volt)
-      print *, "Number of particles           ", n_part
-      print *, "Total weight                  ", sum_weight
-      print *, "collision count               ", coll_count
+      print *, "Number of particles           ", n_part, sum_weight
    end subroutine print_stats
 
    real(dp) function get_weight_1(my_part)
@@ -107,20 +108,5 @@ contains
       type(PC_part_t), intent(in) :: my_part
       get_weight_2 = 2
    end function get_weight_2
-
-   subroutine merge_particles(part_a, part_b)
-      type(PC_part_t), intent(inout) :: part_a, part_b
-      part_a%weight = part_a%weight + part_b%weight
-      part_b%live = .false.
-   end subroutine merge_particles
-
-   subroutine split_particles(part_a, part_b)
-      type(PC_part_t), intent(inout) :: part_a, part_b
-      real(dp) :: old_weight
-      old_weight = part_a%weight
-      part_a%weight = (old_weight + 1)/2
-      part_b = part_a
-      part_b%weight = old_weight/2
-   end subroutine split_particles
 
 end program test_m_particle_core
