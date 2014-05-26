@@ -22,9 +22,9 @@ module m_particle_core
    implicit none
    private
 
-   integer, parameter  :: dp             = kind(0.0d0)
-   integer, parameter :: PC_max_num_colls = 100
-   real(dp), parameter :: PC_dead_weight = -HUGE(1.0_dp)
+   integer, parameter  :: dp               = kind(0.0d0)
+   integer, parameter  :: PC_max_num_colls = 100
+   real(dp), parameter :: PC_dead_weight   = -HUGE(1.0_dp)
 
    !> The particle type
    type PC_part_t
@@ -37,22 +37,12 @@ module m_particle_core
 
    ! Collision type. TODO: rethink this
    type PC_coll_t
-      integer               :: num                    ! The number of different collisions
-      real(dp)              :: max_rate, inv_max_rate ! Maximum collision rate and inverse
-      integer, allocatable  :: types(:)               ! The types of the collisions that can occur
-      real(dp), allocatable :: special_val(:)         ! Special value used by this collision
-      type(LT_table_t)      :: rate_lt                ! Lookup table with collision rates
+      integer                      :: num                    ! The number of different collisions
+      real(dp)                     :: max_rate, inv_max_rate ! Maximum collision rate and inverse
+      integer, allocatable         :: types(:)               ! The types of the collisions that can occur
+      real(dp), allocatable        :: special_val(:)         ! Special value used by this collision
+      type(LT_table_t)             :: rate_lt                ! Lookup table with collision rates
    end type PC_coll_t
-
-   type PC_list_t
-      type(PC_part_t), allocatable :: parts(:)
-      type(LL_int_head_t)          :: clean_up_list
-      type(PC_coll_t)              :: colls
-      integer                      :: n_part
-   end type PC_list_t
-
-   ! We can have multiple lists of particles, for OpenMP
-   type(PC_list_t), allocatable :: PC_PL(:)
 
    ! We then also need multiple RNG states, that should be separated by
    ! at least a few cache lines in memory
@@ -61,10 +51,17 @@ module m_particle_core
       integer           :: separator(32) ! Large enough to be sure
    end type PC_rng_t
 
-   type(PC_rng_t), allocatable :: PC_rng_states(:)
+   type PC_list_t
+      type(PC_part_t), allocatable :: parts(:)
+      type(LL_int_head_t)          :: clean_list
+      type(PC_coll_t)              :: colls
+      real(dp)                     :: mass
+      type(RNG_state_t)            :: rng
+      integer                      :: n_part
+   end type PC_list_t
 
-   !> The mass of the particles in the simulation
-   real(dp) :: PC_particle_mass
+   ! We can have multiple lists of particles, for OpenMP
+   type(PC_list_t), allocatable :: PC_PL(:)
 
    interface
       subroutine if_ipart(my_part)
@@ -117,10 +114,11 @@ module m_particle_core
          real(dp), intent(in) :: real_args(:)
       end function if_filter_func
 
-      subroutine io_2part(part_a, part_b)
+      subroutine io_2part_rng(part_a, part_b, rng_state)
          import
          type(PC_part_t), intent(inout) :: part_a, part_b
-      end subroutine io_2part
+         type(RNG_state_t), intent(inout) :: rng_state
+      end subroutine io_2part_rng
    end interface
 
    procedure(if_iint2_ipart), pointer :: PC_pptr_coll_callback => null()
@@ -150,10 +148,12 @@ module m_particle_core
    public :: PC_loop_iopart
    public :: PC_compute_scalar_sum
    public :: PC_compute_vector_sum
-   public :: sort_p_list
+   public :: PC_resize_part_list
+   public :: PC_share_particles
+   public :: sort_pl
    public :: PC_merge_and_split
    public :: PC_clean_up
-   public :: histogram_p_list
+   public :: histogram_pl
    public :: PC_v_to_en
    public :: PC_speed_to_en
    public :: PC_en_to_vel
@@ -183,22 +183,20 @@ contains
          stop
       end if
 
-      PC_particle_mass = mass
+      ! Allocate particle lists
       n_part_per_list = n_part_max/n_part_lists
-
-      ! Allocate particle storage
       allocate(PC_PL(n_part_lists))
 
-      ! Each list gets its own rng state
-      allocate(PC_rng_states(n_part_lists))
-
+      ! For now, all particles get the same cross sections and mass,
+      ! but this could be changed easily in the future
       do ix = 1, n_part_lists
-         call RNG_set_state(PC_rng_states(ix)%state, (/ix, 1337, 31337, 89234/))
-         allocate(PC_PL(ix)%parts(n_part_per_list))
-
+         PC_PL(ix)%mass   = mass
          PC_PL(ix)%n_part = 0
+
+         allocate(PC_PL(ix)%parts(n_part_per_list))
+         call RNG_set_state(PC_PL(ix)%rng, (/ix, 1337, 31337, 89234/))
          call create_coll_rate_table(PC_PL(ix)%colls, cross_secs, &
-              0.0_dp, max_en_eV, lookup_table_size)
+              mass, 0.0_dp, max_en_eV, lookup_table_size)
       end do
 
    end subroutine PC_initialize
@@ -207,9 +205,61 @@ contains
       integer :: ix
       do ix = 1, size(PC_PL)
          PC_PL(ix)%n_part = 0
-         call LL_clear(PC_PL(ix)%clean_up_list)
+         call LL_clear(PC_PL(ix)%clean_list)
       end do
    end subroutine PC_reset
+
+   subroutine PC_resize_part_list(ix, new_size)
+      integer, intent(in)          :: ix, new_size
+      type(PC_part_t), allocatable :: parts_copy(:)
+
+      allocate(parts_copy(PC_PL(ix)%n_part))
+      deallocate(PC_PL(ix)%parts)
+      allocate(PC_PL(ix)%parts(new_size))
+      PC_PL(ix)%parts(1:PC_PL(ix)%n_part) = parts_copy
+   end subroutine PC_resize_part_list
+
+   ! Share particles between particle lists
+   subroutine PC_share_particles(arg_ixs)
+      integer, intent(in), optional :: arg_ixs(:)
+      integer, allocatable :: ixs(:)
+      integer :: i, i_temp(1)
+      integer :: n_avg, i_min, i_max, n_min, n_max, n_send
+
+      if (present(arg_ixs)) then
+         allocate(ixs(size(arg_ixs)))
+         ixs = arg_ixs
+      else
+         allocate(ixs(size(PC_PL)))
+         ixs = (/ (i, i=1,size(PC_PL)) /)
+      end if
+
+      n_avg = ceiling(sum(PC_PL(ixs)%n_part) / (1.0_dp * size(ixs)))
+
+      do
+         i_temp = maxloc(PC_PL(ixs)%n_part)
+         i_max  = i_temp(1)
+         n_max  = PC_PL(i_max)%n_part
+         i_temp = minloc(PC_PL(ixs)%n_part)
+         i_min  = i_temp(1)
+         n_min  = PC_PL(i_min)%n_part
+
+         ! Difference it at most size(ixs) - 1, if all lists get one more particle
+         ! than the last list
+         if (n_max - n_min < size(ixs)) exit
+
+         ! Send particles from i_max to i_min
+         n_send = min(n_max - n_avg, n_avg - n_min)
+         print *, n_avg, n_send, i_min, n_min, i_max, n_max
+         PC_PL(i_min)%parts(n_min+1:n_min+n_send) = &
+              PC_PL(i_max)%parts(n_max-n_send+1:n_max)
+
+         ! Always at the end of a list, so do not need to clean up later
+         PC_PL(i_min)%n_part = PC_PL(i_min)%n_part + n_send
+         PC_PL(i_max)%n_part = PC_PL(i_max)%n_part - n_send
+      end do
+
+   end subroutine PC_share_particles
 
    subroutine PC_set_pptrs(pptr_bg_vel_sampler, pptr_coll_callback)
       procedure(if_ovec3), optional      :: pptr_bg_vel_sampler
@@ -228,75 +278,72 @@ contains
       !$omp parallel do
       do ix = 1, size(PC_PL)
          print *, ix, PC_PL(ix)%n_part, omp_get_thread_num()
-         call advance_p_list(PC_PL(ix), dt, PC_rng_states(ix)%state)
+         call advance_pl(PC_PL(ix), dt)
       end do
       !$omp end parallel do
    end subroutine PC_advance
 
-   subroutine advance_p_list(p_list, dt, rng_state)
-      type(PC_list_t), intent(inout) :: p_list
-      type(RNG_state_t), intent(inout) :: rng_state
+   subroutine advance_pl(pl, dt)
+      type(PC_list_t), intent(inout) :: pl
       real(dp), intent(in)           :: dt
       integer                        :: ll
 
-      p_list%parts(1:p_list%n_part)%t_left = dt
+      pl%parts(1:pl%n_part)%t_left = dt
       ll = 1
 
-      do while (ll <= p_list%n_part)
-         call move_and_collide(p_list, p_list%parts(ll), ll, rng_state)
+      do while (ll <= pl%n_part)
+         call move_and_collide(pl, ll)
          ll = ll + 1
       end do
 
-      call PC_clean_up(p_list)
-   end subroutine advance_p_list
+      call PC_clean_up(pl)
+   end subroutine advance_pl
 
    !> Perform a collision for an electron, either elastic, excitation, ionizationCollision,
    !! attachment or null.
-   subroutine move_and_collide(p_list, part, p_ix, rng_state)
+   subroutine move_and_collide(pl, ll)
       use m_cross_sec
 
-      type(PC_list_t), intent(inout) :: p_list
-      type(PC_part_t), intent(inout) :: part
-      integer, intent(in)            :: p_ix
-      type(RNG_state_t), intent(inout) :: rng_state
+      type(PC_list_t), intent(inout) :: pl
+      integer, intent(in)            :: ll
       integer                        :: cIx, cType
       real(dp)                       :: coll_time, new_vel
 
       do
-         coll_time = sample_coll_time(p_list%colls, rng_state) ! Set the next collision time
-         if (coll_time > part%t_left) exit
+         coll_time = sample_coll_time(pl%colls, pl%rng) ! Set the next collision time
+         if (coll_time > pl%parts(ll)%t_left) exit
 
-         call advance_particle(part, coll_time)   ! Set x,v at the collision time
-         new_vel = norm2(part%v)
-         cIx     = get_coll_index(p_list%colls, new_vel, rng_state)
+         call advance_particle(pl%parts(ll), coll_time)   ! Set x,v at the collision time
+         new_vel = norm2(pl%parts(ll)%v)
+         cIx     = get_coll_index(pl%colls, new_vel, pl%rng)
 
          if (cIx > 0) then
-            cType = p_list%colls%types(cIx)
+            cType = pl%colls%types(cIx)
 
             if (associated(PC_pptr_coll_callback)) then
                ! TODO: should be thread safe
                ! TODO: add check here whether the particle is still
                ! in a valid region of the domain
-               call PC_pptr_coll_callback(part, cType, cIx)
+               call PC_pptr_coll_callback(pl%parts(ll), cType, cIx)
             end if
 
             ! Perform the corresponding collision
             select case (cType)
             case (CS_attach_t)
-               call attach_collision(p_list, p_ix)
+               call attach_collision(pl, ll)
                go to 100 ! Particle is removed, so exit
             case (CS_elastic_t)
-               call elastic_collision(part, p_list%colls, cIx, rng_state)
+               call elastic_collision(pl, ll, cIx)
             case (CS_excite_t)
-               call excite_collision(part, p_list%colls, cIx, new_vel, rng_state)
+               call excite_collision(pl, ll, cIx, new_vel)
             case (CS_ionize_t)
-               call ionization_collision(p_list, part, p_list%colls, cIx, new_vel, rng_state)
+               call ionization_collision(pl, ll, cIx, new_vel)
             end select
          end if
       end do
 
       ! Update the particle position and velocity to the next timestep
-      call advance_particle(part, part%t_left)
+      call advance_particle(pl%parts(ll), pl%parts(ll)%t_left)
 100   continue
    end subroutine move_and_collide
 
@@ -347,11 +394,9 @@ contains
    end function PC_get_max_coll_rate
 
    !> Perform an elastic collision for particle 'll'
-   subroutine elastic_collision(part, colls, coll_ix, rng_state)
-      type(PC_part_t), intent(inout) :: part
-      type(PC_coll_t), intent(in) :: colls
-      integer, intent(IN)  :: coll_ix
-      type(RNG_state_t), intent(inout) :: rng_state
+   subroutine elastic_collision(pl, ll, coll_ix)
+      type(PC_list_t), intent(inout) :: pl
+      integer, intent(IN)  :: ll, coll_ix
       real(dp)             :: bg_vel(3), com_vel(3)
 
       if (associated(PC_pptr_bg_vel_sampler)) then
@@ -361,63 +406,58 @@ contains
       end if
 
       ! Compute center of mass velocity
-      com_vel = (colls%special_val(coll_ix) * part%v + bg_vel) / &
-           (1 + colls%special_val(coll_ix))
+      com_vel = (pl%colls%special_val(coll_ix) * pl%parts(ll)%v + bg_vel) / &
+           (1 + pl%colls%special_val(coll_ix))
 
       ! Scatter in center of mass coordinates
-      part%v = part%v - com_vel
-      call scatter_isotropic(part, norm2(part%v), rng_state)
-      part%v = part%v + com_vel
+      pl%parts(ll)%v = pl%parts(ll)%v - com_vel
+      call scatter_isotropic(pl%parts(ll), norm2(pl%parts(ll)%v), pl%rng)
+      pl%parts(ll)%v = pl%parts(ll)%v + com_vel
    end subroutine elastic_collision
 
    !> Perform an excitation-collision for particle 'll'
-   subroutine excite_collision(part, colls, coll_ix, velocity, rng_state)
+   subroutine excite_collision(pl, ll, coll_ix, velocity)
       use m_units_constants
-      type(PC_part_t), intent(inout) :: part
-      type(PC_coll_t), intent(in) :: colls
-      integer, intent(IN)  :: coll_ix
+      type(PC_list_t), intent(inout) :: pl
+      integer, intent(IN)  :: coll_ix, ll
       real(dp), intent(IN) :: velocity
-      type(RNG_state_t), intent(inout) :: rng_state
       real(dp)             :: new_vel, energy, old_en
 
-      old_en  = PC_speed_to_en(velocity)
-      energy  = max(0.0_dp, old_en - colls%special_val(coll_ix))
-      new_vel = PC_en_to_vel(energy)
+      old_en  = PC_speed_to_en(velocity, pl%mass)
+      energy  = max(0.0_dp, old_en - pl%colls%special_val(coll_ix))
+      new_vel = PC_en_to_vel(energy, pl%mass)
 
-      call scatter_isotropic(part, new_vel, rng_state)
+      call scatter_isotropic(pl%parts(ll), new_vel, pl%rng)
    end subroutine excite_collision
 
    !> Perform an ionizing collision for particle 'll'
-   subroutine ionization_collision(p_list, part, colls, coll_ix, velocity, rng_state)
+   subroutine ionization_collision(pl, ll, coll_ix, velocity)
       use m_units_constants
-      type(PC_list_t), intent(inout) :: p_list
-      type(PC_part_t), intent(inout) :: part
-      type(PC_coll_t), intent(in) :: colls
-      integer, intent(in)            :: coll_ix
+      type(PC_list_t), intent(inout) :: pl
+      integer, intent(in)            :: coll_ix, ll
       real(dp), intent(IN)           :: velocity
-      type(RNG_state_t), intent(inout) :: rng_state
       type(PC_part_t)                :: new_part
       real(dp)                       :: energy, old_en, first_vel, second_vel
       real(dp)                       :: en_s1, en_s2
 
-      old_en     = PC_speed_to_en(velocity)
-      energy     = max(0.0_dp, old_en - colls%special_val(coll_ix))
+      old_en     = PC_speed_to_en(velocity, pl%mass)
+      energy     = max(0.0_dp, old_en - pl%colls%special_val(coll_ix))
       en_s1      = 0.5D0 * energy
       en_s2      = 0.5D0 * energy
-      first_vel  = PC_en_to_vel(en_s1)
-      second_vel = PC_en_to_vel(en_s2)
+      first_vel  = PC_en_to_vel(en_s1, pl%mass)
+      second_vel = PC_en_to_vel(en_s2, pl%mass)
 
-      new_part = part
-      call scatter_isotropic(part, first_vel, rng_state)
-      call scatter_isotropic(new_part, second_vel, rng_state)
-      call PC_add_part(p_list, new_part)
+      new_part = pl%parts(ll)
+      call scatter_isotropic(pl%parts(ll), first_vel, pl%rng)
+      call scatter_isotropic(new_part, second_vel, pl%rng)
+      call PC_add_part(pl, new_part)
    end subroutine ionization_collision
 
    !> Perform attachment of electron 'll'
-   subroutine attach_collision(p_list, ll)
-      type(PC_list_t), intent(inout) :: p_list
+   subroutine attach_collision(pl, ll)
+      type(PC_list_t), intent(inout) :: pl
       integer, intent(in)            :: ll
-      call PC_remove_part(p_list, ll)
+      call PC_remove_part(pl, ll)
    end subroutine attach_collision
 
    subroutine scatter_isotropic(part, vel_norm, rng_state)
@@ -492,46 +532,46 @@ contains
       end do
    end subroutine PC_correct_new_accel
 
-   subroutine PC_clean_up(p_list)
-      type(PC_list_t), intent(inout) :: p_list
+   subroutine PC_clean_up(pl)
+      type(PC_list_t), intent(inout) :: pl
       integer :: ix_end, ix_clean
       logical :: success
 
       do
          ! Get an index that has to be cleaned from the list
-         call LL_pop(p_list%clean_up_list, ix_clean, success)
+         call LL_pop(pl%clean_list, ix_clean, success)
          if (.not. success) exit
 
          ! Find the last "alive" particle in the list
-         do ix_end = p_list%n_part, 1, -1
-            if (p_list%parts(ix_end)%weight /= PC_dead_weight) then
+         do ix_end = pl%n_part, 1, -1
+            if (pl%parts(ix_end)%weight /= PC_dead_weight) then
                exit
             else
-               p_list%n_part = p_list%n_part - 1
+               pl%n_part = pl%n_part - 1
             end if
          end do
 
          ! Fill in empty spot ix_clean, if it lies before n_part
-         if (ix_clean < p_list%n_part) then
-            p_list%parts(ix_clean) = p_list%parts(p_list%n_part)
-            p_list%n_part = p_list%n_part - 1
+         if (ix_clean < pl%n_part) then
+            pl%parts(ix_clean) = pl%parts(pl%n_part)
+            pl%n_part = pl%n_part - 1
          end if
       end do
    end subroutine PC_clean_up
 
-   subroutine PC_add_part(p_list, part)
-      type(PC_list_t), intent(inout) :: p_list
+   subroutine PC_add_part(pl, part)
+      type(PC_list_t), intent(inout) :: pl
       type(PC_part_t), intent(in)    :: part
       integer                        :: ix
-      ix                   = get_ix_new_particle(p_list)
-      p_list%parts(ix) = part
+      ix                   = get_ix_new_particle(pl)
+      pl%parts(ix) = part
    end subroutine PC_add_part
 
-   function get_ix_new_particle(p_list) result(ix)
-      type(PC_list_t), intent(inout) :: p_list
+   function get_ix_new_particle(pl) result(ix)
+      type(PC_list_t), intent(inout) :: pl
       integer                        :: ix
-      p_list%n_part = p_list%n_part + 1
-      ix            = p_list%n_part
+      pl%n_part = pl%n_part + 1
+      ix            = pl%n_part
    end function get_ix_new_particle
 
    subroutine PC_create_part(pos, vel, accel, weight, t_left, list_ix)
@@ -545,22 +585,22 @@ contains
          ix = 1
       end if
 
-      n_part                                    = PC_PL(ix)%n_part
+      n_part                             = PC_PL(ix)%n_part
       PC_PL(ix)%parts(n_part + 1)%weight = weight
       PC_PL(ix)%parts(n_part + 1)%t_left = t_left
       PC_PL(ix)%parts(n_part + 1)%x      = pos
       PC_PL(ix)%parts(n_part + 1)%v      = vel
       PC_PL(ix)%parts(n_part + 1)%a      = accel
-      PC_PL(ix)%n_part                       = n_part + 1
+      PC_PL(ix)%n_part                   = n_part + 1
    end subroutine PC_create_part
 
    !> Mark particle for removal
-   subroutine PC_remove_part(p_list, ix_to_remove)
-      type(PC_list_t), intent(inout) :: p_list
+   subroutine PC_remove_part(pl, ix_to_remove)
+      type(PC_list_t), intent(inout) :: pl
       integer, intent(in)            :: ix_to_remove
 
-      call LL_add(p_list%clean_up_list, ix_to_remove)
-      p_list%parts(ix_to_remove)%weight = PC_dead_weight
+      call LL_add(pl%clean_list, ix_to_remove)
+      pl%parts(ix_to_remove)%weight = PC_dead_weight
    end subroutine PC_remove_part
 
    subroutine PC_periodify(is_periodic, lengths)
@@ -590,8 +630,9 @@ contains
       end do
    end subroutine PC_translate
 
-   real(dp) function PC_get_part_mass()
-      PC_get_part_mass = PC_particle_mass
+   real(dp) function PC_get_part_mass(ix)
+      integer, intent(in) :: ix
+      PC_get_part_mass = PC_PL(ix)%mass
    end function PC_get_part_mass
 
    !> Return the number of real particles
@@ -652,30 +693,31 @@ contains
       end do
    end subroutine PC_compute_scalar_sum
 
-   real(dp) function PC_v_to_en(v)
-      real(dp), intent(in) :: v(3)
-      PC_v_to_en = 0.5_dp * PC_particle_mass * sum(v**2)
+   real(dp) function PC_v_to_en(v, mass)
+      real(dp), intent(in) :: v(3), mass
+      PC_v_to_en = 0.5_dp * mass * sum(v**2)
    end function PC_v_to_en
 
-   real(dp) elemental function PC_speed_to_en(vel)
-      real(dp), intent(in) :: vel
-      PC_speed_to_en = 0.5_dp * PC_particle_mass * vel**2
+   real(dp) elemental function PC_speed_to_en(vel, mass)
+      real(dp), intent(in) :: vel, mass
+      PC_speed_to_en = 0.5_dp * mass * vel**2
    end function PC_speed_to_en
 
-   real(dp) elemental function PC_en_to_vel(en)
-      real(dp), intent(in) :: en
-      PC_en_to_vel = sqrt(2 * en / PC_particle_mass)
+   real(dp) elemental function PC_en_to_vel(en, mass)
+      real(dp), intent(in) :: en, mass
+      PC_en_to_vel = sqrt(2 * en / mass)
    end function PC_en_to_vel
 
    !> Create a lookup table with cross sections for a number of energies
-   subroutine create_coll_rate_table(colls, cross_secs, min_eV, max_eV, table_size)
+   subroutine create_coll_rate_table(colls, cross_secs, mass, &
+        min_eV, max_eV, table_size)
       use m_units_constants
       use m_cross_sec
       use m_lookup_table
       type(PC_coll_t), intent(out) :: colls
       type(CS_type), intent(in) :: cross_secs(:)
       integer, intent(IN)       :: table_size
-      real(dp), intent(in)      :: min_eV, max_eV
+      real(dp), intent(in)      :: mass, min_eV, max_eV
 
       real(dp)                  :: vel_list(table_size), rate_list(table_size)
       real(dp)                  :: sum_rate_list(table_size)
@@ -683,8 +725,8 @@ contains
       integer, allocatable      :: collIxs(:)
       real(dp)                  :: min_vel, max_vel, en_eV, temp
 
-      min_vel = PC_en_to_vel(min_eV * UC_elec_volt)
-      max_vel = PC_en_to_vel(max_eV * UC_elec_volt)
+      min_vel = PC_en_to_vel(min_eV * UC_elec_volt, mass)
+      max_vel = PC_en_to_vel(max_eV * UC_elec_volt, mass)
 
       colls%num = size(cross_secs)
       allocate( collIxs(colls%num) )
@@ -718,7 +760,7 @@ contains
 
          ! Linear interpolate cross sections by energy
          do i_row = 1, table_size
-            en_eV = PC_speed_to_en(vel_list(i_row)) / UC_elec_volt
+            en_eV = PC_speed_to_en(vel_list(i_row), mass) / UC_elec_volt
             call LT_lin_interp_list(cross_secs(i_coll)%en_cs(1, :), &
                  cross_secs(i_coll)%en_cs(2, :), en_eV, rate_list(i_row))
             rate_list(i_row) = rate_list(i_row) * vel_list(i_row)
@@ -733,9 +775,9 @@ contains
 
    end subroutine create_coll_rate_table
 
-   subroutine sort_p_list(p_list, sort_func)
+   subroutine sort_pl(pl, sort_func)
       use m_mrgrnk
-      type(PC_list_t), intent(inout) :: p_list
+      type(PC_list_t), intent(inout) :: pl
       procedure(if_freal_ipart)      :: sort_func
 
       integer                        :: ix, n_part
@@ -743,22 +785,22 @@ contains
       real(dp), allocatable          :: part_values(:)
       type(PC_part_t), allocatable   :: part_copies(:)
 
-      n_part = p_list%n_part
+      n_part = pl%n_part
       allocate(part_ixs(n_part))
       allocate(part_values(n_part))
       allocate(part_copies(n_part))
 
       do ix = 1, n_part
-         part_copies(ix) = p_list%parts(ix)
+         part_copies(ix) = pl%parts(ix)
          part_values(ix) = sort_func(part_copies(ix))
       end do
 
       call mrgrnk(part_values, part_ixs)
 
       do ix = 1, n_part
-         p_list%parts(ix) = part_copies(part_ixs(ix))
+         pl%parts(ix) = part_copies(part_ixs(ix))
       end do
-   end subroutine sort_p_list
+   end subroutine sort_pl
 
    subroutine PC_get_histogram(hist_func, filter_func, &
         filter_args, x_values, y_values)
@@ -773,16 +815,16 @@ contains
 
       y_values = 0.0_dp
       do ix = 1, size(PC_PL)
-         call histogram_p_list(PC_PL(ix), hist_func, filter_func, &
+         call histogram_pl(PC_PL(ix), hist_func, filter_func, &
               filter_args, x_values, temp)
          y_values = y_values + temp
       end do
    end subroutine PC_get_histogram
 
-   subroutine histogram_p_list(p_list, hist_func, filter_func, &
+   subroutine histogram_pl(pl, hist_func, filter_func, &
         filter_args, x_values, y_values)
       use m_mrgrnk
-      type(PC_list_t), intent(in) :: p_list
+      type(PC_list_t), intent(in) :: pl
       procedure(if_freal_ipart)   :: hist_func
       real(dp), intent(in)        :: x_values(:)
       real(dp), intent(out)       :: y_values(:)
@@ -795,10 +837,10 @@ contains
       real(dp), allocatable       :: part_values(:)
       logical, allocatable        :: part_mask(:)
 
-      n_part = p_list%n_part
+      n_part = pl%n_part
       allocate(part_mask(n_part))
       do ix = 1, n_part
-         part_mask(ix) = filter_func(p_list%parts(ix), filter_args)
+         part_mask(ix) = filter_func(pl%parts(ix), filter_args)
       end do
 
       n_used = count(part_mask)
@@ -807,10 +849,10 @@ contains
       allocate(part_ixs(n_used))
 
       p_ix = 0
-      do ix = 1, p_list%n_part
+      do ix = 1, pl%n_part
          if (part_mask(ix)) then
             p_ix = p_ix + 1
-            part_values(p_ix) = hist_func(p_list%parts(p_ix))
+            part_values(p_ix) = hist_func(pl%parts(p_ix))
          end if
       end do
 
@@ -827,24 +869,24 @@ contains
             o_ix = part_ixs(p_ix) ! Index in the 'old' list
             if (part_values(o_ix) > boundary_value) exit
 
-            y_values(ix) = y_values(ix) + p_list%parts(o_ix)%weight
+            y_values(ix) = y_values(ix) + pl%parts(o_ix)%weight
             p_ix         = p_ix + 1
          end do
       end do outer
 
       ! Fill last bin
-      y_values(num_bins) = sum(p_list%parts(part_ixs(p_ix:n_used))%weight)
-   end subroutine histogram_p_list
+      y_values(num_bins) = sum(pl%parts(part_ixs(p_ix:n_used))%weight)
+   end subroutine histogram_pl
 
    subroutine PC_merge_and_split(coord_weights, max_distance, weight_func, &
         pptr_merge, pptr_split)
       real(dp), intent(in)           :: coord_weights(6), max_distance
       procedure(if_freal_ipart)      :: weight_func
-      procedure(io_2part)            :: pptr_merge, pptr_split
+      procedure(io_2part_rng)            :: pptr_merge, pptr_split
 
       integer :: ix
       do ix = 1, size(PC_PL)
-         call merge_and_split_p_list(PC_PL(ix), coord_weights, max_distance, &
+         call merge_and_split_pl(PC_PL(ix), coord_weights, max_distance, &
               weight_func, pptr_merge, pptr_split)
       end do
    end subroutine PC_merge_and_split
@@ -855,14 +897,14 @@ contains
    ! velocity coordinates. Max_distance is the maxium Euclidean distance between particles
    ! to be merged. The weight_func returns the desired weight for a particle, whereas the
    ! pptr_merge and pptr_split procedures merge and split particles.
-   subroutine merge_and_split_p_list(p_list, coord_weights, max_distance, weight_func, &
+   subroutine merge_and_split_pl(pl, coord_weights, max_distance, weight_func, &
         pptr_merge, pptr_split)
       use m_mrgrnk
       use kdtree2_module
-      type(PC_list_t), intent(inout) :: p_list
+      type(PC_list_t), intent(inout) :: pl
       real(dp), intent(in)           :: coord_weights(6), max_distance
       procedure(if_freal_ipart)      :: weight_func
-      procedure(io_2part)            :: pptr_merge, pptr_split
+      procedure(io_2part_rng)            :: pptr_merge, pptr_split
 
       integer, parameter           :: num_neighbors = 1
       real(dp), parameter          :: large_ratio   = 1.5_dp, small_ratio = 1 / large_ratio
@@ -880,7 +922,7 @@ contains
       type(PC_part_t), allocatable :: part_copy(:)
 
       p_min    = 1
-      p_max    = p_list%n_part
+      p_max    = pl%n_part
       num_part = p_max - p_min + 1
 
       allocate(weight_ratios(num_part))
@@ -888,8 +930,8 @@ contains
       allocate(part_copy(num_part))
 
       do ix = 1, num_part
-         weight_ratios(ix) = p_list%parts(p_min+ix-1)%weight / &
-              weight_func(p_list%parts(p_min+ix-1))
+         weight_ratios(ix) = pl%parts(p_min+ix-1)%weight / &
+              weight_func(pl%parts(p_min+ix-1))
       end do
 
       num_merge      = count(weight_ratios <= small_ratio)
@@ -902,7 +944,7 @@ contains
       ! Sort particles by their relative weight and store them in part_copy
       ! so that particles to be merged are at the beginning of the list
       call mrgrnk(weight_ratios, part_ixs)
-      part_copy = p_list%parts(p_min + part_ixs - 1)
+      part_copy = pl%parts(p_min + part_ixs - 1)
 
       ! Only create a k-d tree if there are enough particles to be merged
       if (num_merge > num_coords) then
@@ -940,8 +982,8 @@ contains
             o_nn_ix = part_ixs(neighbor_ix)
 
             ! Merge, then remove neighbor
-            call pptr_merge(p_list%parts(o_ix), p_list%parts(o_nn_ix))
-            call PC_remove_part(p_list, o_nn_ix)
+            call pptr_merge(pl%parts(o_ix), pl%parts(o_nn_ix), pl%rng)
+            call PC_remove_part(pl, o_nn_ix)
             already_merged((/ix, neighbor_ix/)) = .true.
          end do
       end if
@@ -950,14 +992,14 @@ contains
       num_split = count(weight_ratios >= large_ratio)
 
       do ix = num_part - num_split + 1, num_part
-         ! Change part_copy(ix), then add an extra particle at then end of p_list
+         ! Change part_copy(ix), then add an extra particle at then end of pl
          o_ix = part_ixs(ix)
-         new_ix = get_ix_new_particle(p_list)
-         call pptr_split(p_list%parts(o_ix), p_list%parts(new_ix))
+         new_ix = get_ix_new_particle(pl)
+         call pptr_split(pl%parts(o_ix), pl%parts(new_ix), pl%rng)
       end do
 
-      call PC_clean_up(p_list)
-   end subroutine merge_and_split_p_list
+      call PC_clean_up(pl)
+   end subroutine merge_and_split_pl
 
    ! Merge two particles into part_a, should remove part_b afterwards
    subroutine PC_merge_part_rxv(part_a, part_b, rng_state)
@@ -975,8 +1017,9 @@ contains
       part_a%weight = part_a%weight + part_b%weight
    end subroutine PC_merge_part_rxv
 
-   subroutine PC_split_part(part_a, part_b)
+   subroutine PC_split_part(part_a, part_b, rng_state)
       type(PC_part_t), intent(inout) :: part_a, part_b
+      type(RNG_state_t), intent(inout) :: rng_state
       part_a%weight = part_a%weight * 0.5_dp
       part_b        = part_a
    end subroutine PC_split_part

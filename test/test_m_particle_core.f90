@@ -9,11 +9,11 @@ program test_m_particle_core
    character(len=*), parameter :: cs_file = "test_m_particle_core_cs.txt"
    character(len=*), parameter :: gas_name = "druyv_gas"
 
-   integer, parameter         :: max_num_part  = 100*1000
+   integer, parameter         :: max_num_part  = 1000*1000
    integer, parameter         :: init_num_part = 50*1000
-   integer, parameter         :: max_num_steps = 20
+   integer, parameter         :: max_num_steps = 2
    integer, parameter         :: lkp_tbl_size  = 1000
-   integer, parameter         :: num_lists = 4
+   integer, parameter         :: num_lists = 12
    real(dp), parameter        :: delta_t       = 1.0e-8_dp
    real(dp), parameter        :: max_en_eV     = 1.0e-1_dp
    real(dp), parameter        :: neutral_dens  = 2.5e25_dp
@@ -47,8 +47,10 @@ program test_m_particle_core
       vel = 0.0_dp
       accel = init_accel
       weight = 1
-      call PC_create_part(pos, vel, accel, weight, 0.0_dp, 1 + mod(ll, num_lists))
+      call PC_create_part(pos, vel, accel, weight, 0.0_dp, 1)
    end do
+
+   call PC_share_particles()
 
    do step = 1, max_num_steps
       print *, ""
@@ -58,12 +60,12 @@ program test_m_particle_core
    end do
 
    call print_stats()
-   ! call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-   !      1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
-   ! call print_stats()
-   ! call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-   !      1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
-   ! call print_stats()
+   call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
+        1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
+   call print_stats()
+   call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
+        1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
+   call print_stats()
 
 contains
 
@@ -73,7 +75,7 @@ contains
       vec(1:3) = part%weight * part%x
       vec(4:6) = part%weight * part%v
       vec(7:9) = part%weight * part%a
-      vec(10) = part%weight * PC_v_to_en(part%v)
+      vec(10) = part%weight * PC_v_to_en(part%v, part_mass)
       vec(11) = part%weight
    end subroutine part_stats
 
