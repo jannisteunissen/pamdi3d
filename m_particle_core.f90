@@ -250,7 +250,7 @@ contains
 
          ! Send particles from i_max to i_min
          n_send = min(n_max - n_avg, n_avg - n_min)
-         print *, n_avg, n_send, i_min, n_min, i_max, n_max
+         ! print *, n_avg, n_send, i_min, n_min, i_max, n_max
          PC_PL(i_min)%parts(n_min+1:n_min+n_send) = &
               PC_PL(i_max)%parts(n_max-n_send+1:n_max)
 
@@ -277,7 +277,7 @@ contains
 
       !$omp parallel do
       do ix = 1, size(PC_PL)
-         print *, ix, PC_PL(ix)%n_part, omp_get_thread_num()
+         ! print *, ix, PC_PL(ix)%n_part, omp_get_thread_num()
          call advance_pl(PC_PL(ix), dt)
       end do
       !$omp end parallel do

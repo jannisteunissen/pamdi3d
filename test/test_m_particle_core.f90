@@ -10,11 +10,11 @@ program test_m_particle_core
    character(len=*), parameter :: gas_name = "druyv_gas"
 
    integer, parameter         :: max_num_part  = 1000*1000
-   integer, parameter         :: init_num_part = 50*1000
-   integer, parameter         :: max_num_steps = 2
+   integer, parameter         :: init_num_part = 10*1000
+   integer, parameter         :: max_num_steps = 100
    integer, parameter         :: lkp_tbl_size  = 1000
    integer, parameter         :: num_lists = 12
-   real(dp), parameter        :: delta_t       = 1.0e-8_dp
+   real(dp), parameter        :: delta_t       = 5.0e-9_dp
    real(dp), parameter        :: max_en_eV     = 1.0e-1_dp
    real(dp), parameter        :: neutral_dens  = 2.5e25_dp
    real(dp), parameter        :: part_mass     = UC_elec_mass
@@ -31,7 +31,13 @@ program test_m_particle_core
    call CS_read_file(cs_file, gas_name, 1.0_dp, neutral_dens, 1.0e3_dp)
    call CS_get_cross_secs(cross_secs)
    call CS_write_summary("test_m_particle_core_cs_summ.txt")
-   norm_cross_sec = cross_secs(1)%en_cs(2,1) ! First entry of first (and only) cross sec
+
+   ! All cross sections should be constant, simply take the first value
+   norm_cross_sec = 0
+   do ll = 1, size(cross_secs)
+      norm_cross_sec = norm_cross_sec + cross_secs(ll)%en_cs(2,1)
+   end do
+   print *, "Total cross sec", norm_cross_sec
    mass_ratio = cross_secs(1)%spec_value
 
    print *, "Initializing particle module"
@@ -47,6 +53,7 @@ program test_m_particle_core
       vel = 0.0_dp
       accel = init_accel
       weight = 1
+      ! Put all particles in list 1
       call PC_create_part(pos, vel, accel, weight, 0.0_dp, 1)
    end do
 
