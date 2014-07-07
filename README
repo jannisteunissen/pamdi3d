@@ -1,0 +1,5 @@
+Compilation:
+
+$ make
+$ ./pampi3d my_config_file.txt
+
