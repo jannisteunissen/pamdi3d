@@ -117,6 +117,8 @@ program pampi3d
    print *, " ~~~ initializing global variables module [to be removed]"
    call GL_initializeVariables(myrank, root)
 
+   useElectrode = CFG_varLogic("sim_useElectrode")
+
    ! Initialize all modules that need initialization
    print *, " ~~~ initializing electric field module"
    call E_initialize()
@@ -160,8 +162,6 @@ program pampi3d
         sim_time, n_its)
    call E_compute_field(myrank, root, sim_time)
 
-   useElectrode = CFG_varLogic("sim_useElectrode")
-
    if (useElectrode) then
       do ix = 1, 10
          call E_compute_field(myrank, root, sim_time)
@@ -198,7 +198,7 @@ program pampi3d
    maxInterpErr         = CFG_varDble("sim_maxInterpErr")
    minIncreaseRescale   = CFG_varDble("sim_minIncreaseRescale")
    maxElectrons         = CFG_varDble("sim_maxElectrons")
-   useBGO2Minus         = CFG_varLogic("used_O2MinBackgroundDens")
+   useBGO2Minus         = CFG_varLogic("sim_use_O2Min_bg")
    flagAddBG            = CFG_varLogic("sim_addBGElectrons")
 
    nextTau              = minTimestep

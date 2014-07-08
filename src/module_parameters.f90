@@ -51,7 +51,7 @@ CONTAINS
       CALL CFG_addVar("sim_useTimeDepRNG", .false., "Whether the RNG is initialized using the current time")
 
       CALL CFG_addVar("ref_maxLevels", 4, "The maximum number of refinement levels in the electric field")
-      CALL CFG_addVar("ref_min_lvl_electrode", 2, "The minimum refinement lvl around the electrode tip")
+      CALL CFG_addVar("ref_min_lvl_electrode", 3, "The minimum refinement lvl around the electrode tip")
       CALL CFG_addVar("ref_outsideGridRatio", 4.0d0, &
          & "The ratio of the *boundary condition supplying grid* to the coarsest normal grid")
       CALL CFG_addVar("ref_min_grid_size", 8, "The minimum number of grid points in any direction of a refined grid")
@@ -61,7 +61,7 @@ CONTAINS
          & "List of spatial stepsizes for the electric fields in ref_EfieldValues", varSize = .true.)
       CALL CFG_addVar("ref_maxEfieldAtDelta", (/3.0d7,    2.0d7,   1.5d7,   1.0d7,   3.0d6,   0.0d0/), &
          & "List of electric field values at which we specify the max. spatial stepsize", varSize = .true.)
-      CALL CFG_addVar("ref_timePerAdaptation",  5.0d-11, &
+      CALL CFG_addVar("ref_timePerAdaptation",  2.0d-11, &
          & "Time between consecutive adaptations of the grid structure")
       CALL CFG_addVar("ref_MinElecDens",  1.0d15, &
          & "Minimum electron density for considering refining in a region")
@@ -102,7 +102,7 @@ CONTAINS
       CALL CFG_addVar("init_relSeedPos", (/0.5D0, 0.5D0, 0.5D0/), "The relative position of the ion pairs in the domain")
       CALL CFG_addVar("init_backgroundDensity", 0.0D0, "The background ion/electron density in the domain")
       CALL CFG_addVar("init_O2MinBackgroundDens", 0.0D0, "The background O2- density in the domain")
-      CALL CFG_addVar("used_O2MinBackgroundDens", .FALSE., "Whether we use backgroundO2- in the simulation!")
+      CALL CFG_addVar("sim_use_O2Min_bg", .FALSE., "Whether we use backgroundO2- in the simulation")
       CALL CFG_addVar("sim_ZenerInLiquidUsed", .FALSE., "Whether we use zener model in liquid!")
       CALL CFG_addVar("ref_epsilonRelative", 1.d0, "The relative permitivity in different media!")
 

@@ -1,0 +1,53 @@
+PI_enabled                  = t
+
+elec_boundaryType           = 1
+elec_boundaryType           = 2 # zero at side-walls
+elec_times                  = 0.0d-9 1.0d-9
+elec_voltages               = 1.0d3 3.5d3
+electrode_Hcone             = 0.5d-3
+electrode_RcTip             = 0.05d-3
+electrode_RcTrans           = 0.05d-3
+electrode_Rcyl              = 0.25d-3
+electrode_spacing           = 3.0d-6
+electrode_xyzRelPos         = 0.5d0, 0.5d0, 0.5d0
+
+grid_delta                  = 128.0D-6 128.0D-6 128.0D-6
+grid_size                   = 65 65 65
+
+init_O2MinBackgroundDens    = 0.0d13
+init_backgroundDensity      = 0.0d12
+init_condType               = Gaussian
+init_electronEnergy         = 0.1D0
+init_nIonPairs              = 1d4
+init_relSeedPos             = 0.5d0 0.5d0 0.5d0
+init_seedPosRadius          = 100.0D-6
+
+output_timestep             = 1.0D-10
+
+part_maxRelDistForMerge     = 1.0
+part_maxWeight              = 1000
+part_minPartPerCell         = 64
+part_nParticlesMax          = 100
+part_nParticlesRescale      = 100000
+
+ref_MinElecDens             = 1.0e9
+ref_deltaValues             = 2.0d-6, 4.0d-6, 8.0d-6, 16.0d-6, 32.0d-6 64.0d-6 128.0d-6
+ref_maxEfieldAtDelta        = 4.0d7 2.5d7 1.5d7 0.9d7 0.7d7 0.55d7 0.5d7
+ref_maxLevels               = 8
+ref_timePerAdaptation = 1.0d-11
+
+sim_endTime                 = 100.0D-9
+sim_gasFiles                = "siglo_cs.txt" "siglo_cs.txt"
+sim_gasFractions            = 0.8D0 0.2d0
+sim_gasNames                = "N2" "O2"
+sim_gasPressure             = 1.0d0
+sim_gasTemperature          = 293.d0
+sim_maxEfieldErr            = 25.0D-3
+sim_maxInterpErr            = 50.0D-3
+sim_maxTimestep             = 10.0D-12
+sim_minIncreaseRescale      = 1.2D0
+sim_minTimestep             = 1.0D-13
+sim_name                    = example_2
+sim_useElectrode            = t
+sim_useTimeDepRNG           = f
+
