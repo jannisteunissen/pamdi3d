@@ -13,7 +13,7 @@
 ODIR		= objects
 SDIR		= src
 MDIR		= modules
-UDIR	= ./pampi3d_libs
+UDIR	= ./pamdi3d_libs
 INCDIRS	= $(UDIR)/silo_lib/include $(UDIR)/kdtree2/src-f90
 LIBDIRS	= $(UDIR)/fishpack4.1/lib $(UDIR)/silo_lib/lib $(UDIR)/kdtree2/src-f90
 LIBS	= fishpack silo kdtree2
@@ -100,9 +100,9 @@ OBJS		= $(patsubst %,$(ODIR)/%,$(_OBJS))
 
 .PHONY:		all cleanlibs clean tarball
 
-all: | pampi3d_libs
+all: | pamdi3d_libs
 	@echo
-	@echo "~~~ BUILDING pampi3d  ~~~"
+	@echo "~~~ BUILDING pamdi3d  ~~~"
 	@echo " Checking whether directories exist... "
 	@test -d $(ODIR) || mkdir $(ODIR)
 	@test -d $(MDIR) || mkdir $(MDIR)
@@ -110,23 +110,23 @@ all: | pampi3d_libs
 	@test -d $(UDIR) || (echo "Error: user directory does not exists! This is needed for libraries."; exit 1)
 	@test -d input || (echo "Error: input directory does not exists! This is needed for cross sections."; exit 1)
 	@test -d $(SDIR) || (echo "Error: Cannot find the source files."; exit 1)
-	make pampi3d
+	make pamdi3d
 	@echo
 	@echo "~~~ Compilation complete   ~~~"
 	@echo
 
-pampi3d_libs:
-	tar -xzf pampi3d_libs.tar.gz
-	make -C pampi3d_libs all
+pamdi3d_libs:
+	tar -xzf pamdi3d_libs.tar.gz
+	make -C pamdi3d_libs all
 
 cleanlibs:
-	rm -rf pampi3d_libs
+	rm -rf pamdi3d_libs
 
 clean:
-	rm -f $(ODIR)/*.o $(MDIR)/*.mod pampi3d
+	rm -f $(ODIR)/*.o $(MDIR)/*.mod pamdi3d
 
 tarball:
-	tar -czf pampi3d.tar.gz $(patsubst %,$(SDIR)/%,$(_SRC_F90)) $(SDIR)/pampi3d.f90 Makefile config.txt Doxyfile \
+	tar -czf pamdi3d.tar.gz $(patsubst %,$(SDIR)/%,$(_SRC_F90)) $(SDIR)/pamdi3d.f90 Makefile config.txt Doxyfile \
 	input/sigloNew.txt COPYING.txt INSTALL.txt
 
 # ###############################
@@ -134,10 +134,10 @@ tarball:
 # that make knows how to compile the program.
 # ###############################
 
-pampi3d: 	$(ODIR)/pampi3d.o $(OBJS)
+pamdi3d: 	$(ODIR)/pamdi3d.o $(OBJS)
 		$(LinkAll)
 
-$(ODIR)/pampi3d.o :	$(ODIR)/module_crossSections.o \
+$(ODIR)/pamdi3d.o :	$(ODIR)/module_crossSections.o \
 				$(ODIR)/module_initialCond.o \
 				$(ODIR)/module_particle.o \
 				$(ODIR)/m_efield_amr.o \
