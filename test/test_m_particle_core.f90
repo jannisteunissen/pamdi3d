@@ -22,15 +22,14 @@ program test_m_particle_core
    real(dp)                   :: norm_cross_sec, mass_ratio
    real(dp)                   :: pos(3), vel(3), accel(3), weight
    integer                    :: ll, step, num_colls
-   type(CS_type), allocatable :: cross_secs(:)
+   type(CS_t), allocatable :: cross_secs(:)
 
    print *, "Testing m_particle_core.f90 implementation"
 
    ! Use constant momentum transfer cross section, so that we get a Druyvesteyn distribution
    print *, "Reading in cross sections from ", trim(cs_file)
-   call CS_read_file(cs_file, gas_name, 1.0_dp, neutral_dens, 1.0e3_dp)
-   call CS_get_cross_secs(cross_secs)
-   call CS_write_summary("test_m_particle_core_cs_summ.txt")
+   call CS_add_from_file(cs_file, gas_name, 1.0_dp, neutral_dens, &
+        1.0e3_dp, cross_secs)
 
    ! All cross sections should be constant, simply take the first value
    norm_cross_sec = 0
