@@ -21,12 +21,15 @@ program test_m_particle_core
    real(dp), parameter        :: init_accel(3) = (/0.0_dp, 0.0_dp, 1.0e12_dp/)
    real(dp)                   :: norm_cross_sec, mass_ratio
    real(dp)                   :: pos(3), vel(3), accel(3), weight
-   integer                    :: ll, step, num_colls
+   integer                    :: ll, step, num_colls, i
    type(CS_t), allocatable :: cross_secs(:)
+   integer, parameter :: n_pc = 4
+   type(PC_t) :: pmodels(n_pc)
 
    print *, "Testing m_particle_core.f90 implementation"
 
-   ! Use constant momentum transfer cross section, so that we get a Druyvesteyn distribution
+   ! Use constant momentum transfer cross section, so that we get a Druyvesteyn
+   ! distribution
    print *, "Reading in cross sections from ", trim(cs_file)
    call CS_add_from_file(cs_file, gas_name, 1.0_dp, neutral_dens, &
         1.0e3_dp, cross_secs)
@@ -37,13 +40,16 @@ program test_m_particle_core
       norm_cross_sec = norm_cross_sec + cross_secs(ll)%en_cs(2,1)
    end do
    print *, "Total cross sec", norm_cross_sec
-   mass_ratio = cross_secs(1)%spec_value
+   mass_ratio = cross_secs(1)%coll%rel_mass
 
    print *, "Initializing particle module"
    print *, part_mass
-   call PC_initialize(part_mass, cross_secs, lkp_tbl_size, max_en_eV, &
-        max_num_part, num_lists)
-   num_colls = PC_get_num_colls(1)
+   do i = 1, n_pc
+      call pmodels(i)%initialize(part_mass, cross_secs, lkp_tbl_size, &
+           max_en_eV, max_num_part)
+   end do
+   
+   num_colls = pmodels(1)%get_num_colls()
    deallocate(cross_secs)
 
    print *, "Creating initial particles"
@@ -52,47 +58,58 @@ program test_m_particle_core
       vel = 0.0_dp
       accel = init_accel
       weight = 1
-      ! Put all particles in list 1
-      call PC_create_part(pos, vel, accel, weight, 0.0_dp, 1)
+      ! i = 1 + mod(ll, n_pc)
+      call pmodels(1)%create_part(pos, vel, accel, weight, 0.0_dp)
    end do
 
-   call PC_share_particles()
+   call PC_share_particles(pmodels)
 
    do step = 1, max_num_steps
       print *, ""
       print *, "at step", step, " and time ", (step-1) * delta_t
       call print_stats()
-      call PC_advance(delta_t)
+      !$omp parallel do
+      do i = 1, n_pc
+         call pmodels(i)%advance(delta_t)
+      end do
+      !$omp end parallel do
    end do
 
    call print_stats()
-   call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-        1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
-   call print_stats()
-   call PC_merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-        1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
-   call print_stats()
+   ! call pmodel%merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
+   !      1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
+   ! call print_stats()
+   ! call pmodel%merge_and_split((/0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
+   !      1.0e-6_dp, get_weight_2, PC_merge_part_rxv, PC_split_part)
+   ! call print_stats()
 
 contains
 
    subroutine part_stats(part, vec)
       type(PC_part_t), intent(in) :: part
       real(dp), intent(out) :: vec(:)
-      vec(1:3) = part%weight * part%x
-      vec(4:6) = part%weight * part%v
-      vec(7:9) = part%weight * part%a
-      vec(10) = part%weight * PC_v_to_en(part%v, part_mass)
-      vec(11) = part%weight
+      vec(1:3) = part%w * part%x
+      vec(4:6) = part%w * part%v
+      vec(7:9) = part%w * part%a
+      vec(10) = part%w * PC_v_to_en(part%v, part_mass)
+      vec(11) = part%w
    end subroutine part_stats
 
    subroutine print_stats()
       integer :: n_part
       real(dp) :: sum_x(3), sum_v(3), sum_a(3), sum_en
       real(dp) :: sum_weight
-      real(dp) :: sum_vec(11)
+      real(dp) :: sum_vec(11), tmp_vec(11)
 
-      n_part = PC_get_num_sim_part()
-      call PC_compute_vector_sum(part_stats, sum_vec)
+      n_part = 0
+      sum_vec = 0
+      
+      do i = 1, n_pc
+         n_part = n_part + pmodels(i)%get_num_sim_part()
+         call pmodels(i)%compute_vector_sum(part_stats, tmp_vec)
+         sum_vec = sum_vec + tmp_vec
+      end do
+      
       sum_weight = sum_vec(11)
       sum_x = sum_vec(1:3)
       sum_v = sum_vec(4:6)

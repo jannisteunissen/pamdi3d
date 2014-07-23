@@ -2,7 +2,7 @@ program test_m_cross_sec
    use m_cross_sec
 
    integer, parameter :: dp = kind(0.0d0)
-   type(CS_type), allocatable :: cross_secs(:)
+   type(CS_t), allocatable :: cross_secs(:)
 
    character(len=*), parameter :: first_in = "test_m_cross_sec_input.txt"
    character(len=*), parameter :: first_out = "test_m_cross_sec_all_output.txt"
@@ -14,7 +14,7 @@ program test_m_cross_sec
    call CS_add_from_file(first_in, gas_2, 1.0_dp, 1.0_dp, 1.0e3_dp, cross_secs)
    call CS_add_from_file(first_in, gas_3, 1.0_dp, 1.0_dp, 1.0e3_dp, cross_secs)
 
-   call CS_write_summary(first_summ)
+   call CS_write_summary(cross_secs, first_summ)
    print *, "First pass: read in ", size(cross_secs), " cross sections"
 
    deallocate(cross_secs)

@@ -270,10 +270,10 @@ contains
        deallocate(cross_secs)
        allocate(cross_secs(n + cIx))
        cross_secs(1:n) = cs_cpy
-       cross_secs(n+1:) = cs_buf(:)
+       cross_secs(n+1:) = cs_buf(1:cIx)
     else
        allocate(cross_secs(cIx))
-       cross_secs(:) = cs_buf(:)
+       cross_secs(:) = cs_buf(1:cIx)
     end if
 
     return

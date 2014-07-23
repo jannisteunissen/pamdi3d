@@ -38,7 +38,7 @@ module m_particle_core
   type PC_t
      private
      type(PC_part_t), allocatable :: particles(:)
-     integer                      :: n_part
+     integer, public              :: n_part
      type(CS_coll_t), allocatable :: colls(:)
      integer                      :: n_colls
      type(LT_table_t)             :: rate_lt                ! Lookup table with collision rates
@@ -46,6 +46,7 @@ module m_particle_core
      type(LL_int_head_t)          :: clean_list
      real(dp)                     :: mass
      type(RNG_t)                  :: rng
+     integer                      :: separator(100)  ! Separate rng data
 
    contains
      procedure, non_overridable :: initialize
@@ -71,6 +72,7 @@ module m_particle_core
      procedure, non_overridable :: compute_scalar_sum
      procedure, non_overridable :: compute_vector_sum
      procedure, non_overridable :: move_and_collide
+     procedure, non_overridable :: set_coll_rates
 
      procedure, non_overridable :: merge_and_split
      procedure, non_overridable :: histogram
@@ -104,6 +106,10 @@ module m_particle_core
   public :: PC_t
 
   ! Public procedures
+  public :: PC_merge_part_rxv
+  public :: PC_split_part
+  public :: PC_v_to_en
+  public :: PC_share_particles
 
 contains
 
@@ -121,18 +127,14 @@ contains
     if (size(cross_secs) < 1) then
        print *, "No cross sections given, will abort"
        stop
-    else if (size(cross_secs) > PC_max_num_colls) then
-       print *, "Too many collisions, increase PC_max_num_colls"
-       stop
     end if
 
     allocate(self%particles(n_part_max))
     self%mass   = mass
     self%n_part = 0
 
-    call self%rng%set_seed(1337)
-    call create_coll_rate_table(self%colls, cross_secs, &
-         mass, 0.0_dp, max_en_eV, lookup_table_size)
+    call self%rng%set_seed((/1, 3, 3, 1337/))
+    call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
   end subroutine initialize
 
   subroutine destroy(self)
@@ -149,7 +151,6 @@ contains
 
   subroutine remove_particles(self)
     class(PC_t), intent(inout) :: self
-    integer :: ix
     self%n_part = 0
     call LL_clear(self%clean_list)
   end subroutine remove_particles
@@ -165,47 +166,115 @@ contains
     self%particles(1:self%n_part) = parts_copy
   end subroutine resize_part_list
 
-  ! Share particles between particle lists
-  ! subroutine PC_share_particles(arg_ixs)
-  !   integer, intent(in), optional :: arg_ixs(:)
-  !   integer, allocatable :: ixs(:)
-  !   integer :: i, i_temp(1)
-  !   integer :: n_avg, i_min, i_max, n_min, n_max, n_send
+  ! Share particles between PC_t objects
+  subroutine PC_share_particles(pcs)
+    type(PC_t), intent(inout) :: pcs(:)
 
-  !   if (present(arg_ixs)) then
-  !      allocate(ixs(size(arg_ixs)))
-  !      ixs = arg_ixs
-  !   else
-  !      allocate(ixs(size(PC_PL)))
-  !      ixs = (/ (i, i=1,size(PC_PL)) /)
-  !   end if
+    integer :: i, i_temp(1), n_pc
+    integer :: n_avg, i_min, i_max, n_min, n_max, n_send
 
-  !   n_avg = ceiling(sum(PC_PL(ixs)%n_part) / (1.0_dp * size(ixs)))
+    n_pc = size(pcs)
+    n_avg = ceiling(sum(pcs(:)%n_part) / real(n_pc, dp))
 
-  !   do
-  !      i_temp = maxloc(PC_PL(ixs)%n_part)
-  !      i_max  = i_temp(1)
-  !      n_max  = PC_PL(i_max)%n_part
-  !      i_temp = minloc(PC_PL(ixs)%n_part)
-  !      i_min  = i_temp(1)
-  !      n_min  = PC_PL(i_min)%n_part
+    do
+       i_temp = maxloc(pcs(:)%n_part)
+       i_max  = i_temp(1)
+       n_max  = pcs(i_max)%n_part
+       i_temp = minloc(pcs(:)%n_part)
+       i_min  = i_temp(1)
+       n_min  = pcs(i_min)%n_part
 
-  !      ! Difference it at most size(ixs) - 1, if all lists get one more particle
-  !      ! than the last list
-  !      if (n_max - n_min < size(ixs)) exit
+       ! Difference it at most size(ixs) - 1, if all lists get one more particle
+       ! than the last list
+       if (n_max - n_min < n_pc) exit
 
-  !      ! Send particles from i_max to i_min
-  !      n_send = min(n_max - n_avg, n_avg - n_min)
-  !      ! print *, n_avg, n_send, i_min, n_min, i_max, n_max
-  !      PC_PL(i_min)%parts(n_min+1:n_min+n_send) = &
-  !           PC_PL(i_max)%parts(n_max-n_send+1:n_max)
+       ! Send particles from i_max to i_min
+       n_send = min(n_max - n_avg, n_avg - n_min)
+       ! print *, n_avg, n_send, i_min, n_min, i_max, n_max
+       pcs(i_min)%particles(n_min+1:n_min+n_send) = &
+            pcs(i_max)%particles(n_max-n_send+1:n_max)
 
-  !      ! Always at the end of a list, so do not need to clean up later
-  !      PC_PL(i_min)%n_part = PC_PL(i_min)%n_part + n_send
-  !      PC_PL(i_max)%n_part = PC_PL(i_max)%n_part - n_send
-  !   end do
+       ! Always at the end of a list, so do not need to clean up later
+       pcs(i_min)%n_part = pcs(i_min)%n_part + n_send
+       pcs(i_max)%n_part = pcs(i_max)%n_part - n_send
+    end do
+  end subroutine PC_share_particles
 
-  ! end subroutine PC_share_particles
+  subroutine PC_reorder_by_bins(pcs, bin_func, n_bins)
+    use m_mrgrnk
+    type(PC_t), intent(inout) :: pcs(:)
+    procedure(if_oint_ipart) :: bin_func
+    integer, intent(in) :: n_bins
+    integer, allocatable :: bin_counts(:,:)
+    integer, allocatable :: bin_counts_sum(:)
+    integer, allocatable :: bin_divider(:)
+    integer, allocatable :: bin_owner(:)
+    integer :: n, n_pc, n_avg
+
+    n_pc = size(pcs)
+    n_avg = ceiling(sum(pcs(:)%n_part) / real(n_pc, dp))
+    max_n_part = maxval(pcs(:)%n_part)
+
+    allocate(bin_counts(n_bins, n_pc))
+    allocate(bin_counts_sum(n_bins))
+    allocate(bin_divider(0:n_pc))
+    allocate(bin_divider(n_bins))
+    bin_counts(:, :) = 0
+
+    ! Get the counts in the bins for each pcs(ip)
+    do ip = 1, n_pc
+       do ll = 1, pcs(ip)%n_part
+          ib = bin_func(pcs(ip)%particles(ll))
+          bin_counts(ib, ip) = bin_counts(ib, ip) + 1
+       end do
+    end do
+
+    bin_counts_sum = sum(bin_counts, dim=2)
+
+    ib = 0
+    cum_sum = 0
+    ip = 1
+
+    ! Set the owners of the bins
+    do
+       ib = ib + 1
+       cum_sum = cum_sum + bin_counts_sum(ib)
+       bin_owner(ib) = ip
+       
+       if (cum_sum >= n_avg) then
+          ip = ip + 1
+          cum_sum = 0
+       end if
+    end do
+
+    ! Set placement offset
+    do ib = 1, n_bins
+       do ip = 1, n_pc
+          offset(ib, ip) =
+       end do
+    end do
+
+    allocate(add_cnt(n_bins, n_pc))
+    add_cnt = 0
+    
+    do ip = 1, n_pc
+       do ll = 1, pcs(ip)%n_part
+          ib = bin_func(pcs(ip)%particles(ll))
+          io = bin_owner(ib)
+          if (io =/ ib) then
+             ! Insert at the right place at owner
+             add_cnt(ib, ip) = add_cnt(ib, ip) + 1
+             new_loc = offset(io, ip) + add_cnt(ib, ip)
+             pcs(io)%particles(new_loc) = pcs(ip)%particles(ll)
+             call LL_add(pcs(ip)%clean_list, ll)
+          end if
+       end do
+    end do
+
+    do ip = 1, n_pc
+       call clean_up(pcs(ip))
+    end do
+  end subroutine PC_reorder_by_bins
 
   subroutine advance(self, dt)
     class(PC_t), intent(inout) :: self
@@ -245,8 +314,8 @@ contains
        ! TODO: add check here whether the particle is still
        ! in a valid region of the domain
        new_vel = norm2(self%particles(ll)%v)
-       cIx     = get_coll_index(self%rate_lt, self%n_colls, velocity, &
-            self%rng%uni_01())
+       cIx     = get_coll_index(self%rate_lt, self%n_colls, self%max_rate, &
+            new_vel, self%rng%uni_01())
 
        if (cIx > 0) then
           ! Perform the corresponding collision
@@ -255,17 +324,17 @@ contains
           select case (cType)
           case (CS_attach_t)
              call attach_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), rng)
+                  self%colls(cIx), self%rng)
              go to 100 ! Particle is removed, so exit
           case (CS_elastic_t)
              call elastic_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), rng)
+                  self%colls(cIx), self%rng)
           case (CS_excite_t)
              call excite_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), rng)
+                  self%colls(cIx), self%rng)
           case (CS_ionize_t)
              call ionization_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), rng)
+                  self%colls(cIx), self%rng)
           end select
 
           ! Store the particles returned. The first one goes at location ll, the
@@ -295,32 +364,33 @@ contains
     sample_coll_time = -log(1 - self%rng%uni_01()) * self%inv_max_rate
   end function sample_coll_time
 
-  !> From the list crosssec(:) select the index of the process that will occur,
-  !! or set colIndex = 0 if there is a null collision
   integer function get_coll_index(rate_lt, n_colls, max_rate, &
        velocity, rand_unif)
     use m_find_index
     type(LT_table_t), intent(in) :: rate_lt
-    real(dp), intent(IN)        :: velocity, rand_unif, max_rate
-    integer, intent(in)         :: n_colls
-    real(dp)                    :: rand_rate, buffer(n_colls)
+    real(dp), intent(IN)         :: velocity, rand_unif, max_rate
+    integer, intent(in)          :: n_colls
+    real(dp)                     :: rand_rate
+    ! This has to do with openmp. It's quite interesting. Ask me about it.
+    integer, parameter           :: PC_max_num_coll = 100
+    ! real(dp)                   :: buffer(n_colls)
+    real(dp)                     :: buffer(PC_max_num_coll)
 
     ! Fill an array with interpolated rates
-    buffer(n_colls) = LT_get_mcol(rate_lt, velocity)
+    buffer(1:n_colls) = LT_get_mcol(rate_lt, velocity)
 
     ! Get a random collision frequency
     rand_rate = rand_unif * max_rate
 
     ! Determine the type of collision by finding the index in the list
-    get_coll_index = FI_adaptive_r(buffer, rand_rate)
+    get_coll_index = FI_adaptive_r(buffer(1:n_colls), rand_rate)
 
     ! If there was no collision, the index exceeds the list and is set to 0
     if (get_coll_index == n_colls+1) get_coll_index = 0
   end function get_coll_index
 
-  real(dp) function get_max_coll_rate(self, ix)
+  real(dp) function get_max_coll_rate(self)
     class(PC_t), intent(in) :: self
-    integer, intent(in) :: ix
     get_max_coll_rate = self%max_rate
   end function get_max_coll_rate
 
@@ -334,13 +404,9 @@ contains
 
     real(dp)                           :: bg_vel(3), com_vel(3)
 
-    if (associated(PC_pptr_bg_vel_sampler)) then
-       call PC_pptr_bg_vel_sampler(bg_vel)
-    else
-       bg_vel = 0.0_dp
-    end if
-
-    n_part_out = 1
+    ! TODO: implement random bg velocity
+    bg_vel      = 0.0_dp
+    n_part_out  = 1
     part_out(1) = part_in
 
     ! Compute center of mass velocity
@@ -361,7 +427,7 @@ contains
     type(CS_coll_t), intent(in)        :: coll
     type(RNG_t), intent(inout) :: rng
 
-    real(dp)             :: energy, old_en
+    real(dp)             :: energy, old_en, new_vel
 
     old_en  = PC_v_to_en(part_in%v, coll%part_mass)
     energy  = max(0.0_dp, old_en - coll%en_loss)
@@ -524,7 +590,7 @@ contains
     class(PC_t), intent(inout) :: self
     logical, intent(in) :: is_periodic(3)
     real(dp), intent(in) :: lengths(3)
-    integer :: ix, i_dim, n_part
+    integer :: i_dim, n_part
 
     n_part = self%n_part
     do i_dim = 1, 3
@@ -544,9 +610,8 @@ contains
     end do
   end subroutine translate
 
-  real(dp) function get_part_mass(self, ix)
+  real(dp) function get_part_mass(self)
     class(PC_t), intent(inout) :: self
-    integer, intent(in) :: ix
     get_part_mass = self%mass
   end function get_part_mass
 
@@ -651,12 +716,12 @@ contains
     class(PC_t), intent(inout) :: self
     type(CS_t), intent(in) :: cross_secs(:)
     integer, intent(in)       :: table_size
-    real(dp), intent(in)      :: mass, min_eV, max_eV
+    real(dp), intent(in)      :: mass, max_eV
 
     real(dp)                  :: vel_list(table_size), rate_list(table_size)
     real(dp)                  :: sum_rate_list(table_size)
-    integer                   :: ix, i_c, i_row
-    real(dp)                  :: max_vel, en_eV, temp
+    integer                   :: ix, i_c, i_row, n_colls
+    real(dp)                  :: max_vel, en_eV
 
     max_vel = PC_en_to_vel(max_eV * UC_elec_volt, mass)
 
@@ -695,13 +760,13 @@ contains
 
   subroutine sort(self, sort_func)
     use m_mrgrnk
-    class(PC_t), intent(inout) :: self
-    procedure(if_freal_ipart)      :: sort_func
+    class(PC_t), intent(inout)   :: self
+    procedure(if_freal_ipart)    :: sort_func
 
-    integer                        :: ix, n_part
-    integer, allocatable           :: part_ixs(:)
-    real(dp), allocatable          :: part_values(:)
-    type(PC_part_t), allocatable   :: part_copies(:)
+    integer                      :: ix, n_part
+    integer, allocatable         :: part_ixs(:)
+    real(dp), allocatable        :: part_values(:)
+    type(PC_part_t), allocatable :: part_copies(:)
 
     n_part = self%n_part
     allocate(part_ixs(n_part))
@@ -792,19 +857,18 @@ contains
     real(dp), intent(in)         :: coord_weights(6), max_distance
 
     interface
-       subroutine pptr_merge(part_a, part_b, part_out, n_part_out, uni_01)
+       subroutine pptr_merge(part_a, part_b, part_out, rng)
          import
-         type(PC_part_t), intent(in)    :: part_a, part_b
-         type(PC_part_t), intent(inout) :: part_out(:)
-         integer, intent(out)           :: n_part_out
-         real(dp), intent(in)           :: uni_01
+         type(PC_part_t), intent(in)  :: part_a, part_b
+         type(PC_part_t), intent(out) :: part_out
+         type(RNG_t), intent(inout)   :: rng
        end subroutine pptr_merge
 
-       subroutine pptr_split(part_a, part_out, n_part_out)
+       subroutine pptr_split(part_a, part_out, rng)
          import
-         type(PC_part_t), intent(in)    :: part_a
-         type(PC_part_t), intent(inout) :: part_out(:)
-         integer, intent(out)           :: n_part_out
+         type(PC_part_t), intent(in)  :: part_a
+         type(PC_part_t), intent(inout) :: part_out(2)
+         type(RNG_t), intent(inout)   :: rng
        end subroutine pptr_split
     end interface
     procedure(if_freal_ipart)    :: weight_func
@@ -818,12 +882,13 @@ contains
 
     integer                      :: num_part, num_merge, num_split
     integer                      :: p_min, p_max, n_too_far
-    integer                      :: o_ix, o_nn_ix, new_ix
+    integer                      :: o_ix, o_nn_ix
     integer                      :: ix, neighbor_ix, cntr, num_coords
     logical, allocatable         :: already_merged(:)
     integer, allocatable         :: part_ixs(:)
     real(dp), allocatable        :: coord_data(:, :), weight_ratios(:)
     type(PC_part_t), allocatable :: part_copy(:)
+    type(PC_part_t) :: part_out(2)
 
     p_min    = 1
     p_max    = self%n_part
@@ -858,9 +923,11 @@ contains
           if (coord_weights(ix) /= 0.0_dp) then
              cntr = cntr + 1
              if (ix <= 3) then ! Spatial coordinates
-                coord_data(cntr, :) = part_copy(1:num_merge)%x(ix) * coord_weights(ix)
+                coord_data(cntr, :) = part_copy(1:num_merge)%x(ix) * &
+                     coord_weights(ix)
              else              ! Velocity coordinates
-                coord_data(cntr, :) = part_copy(1:num_merge)%v(ix-3) * coord_weights(ix)
+                coord_data(cntr, :) = part_copy(1:num_merge)%v(ix-3) * &
+                     coord_weights(ix)
              end if
           end if
        end do
@@ -886,7 +953,9 @@ contains
           o_nn_ix = part_ixs(neighbor_ix)
 
           ! Merge, then remove neighbor
-          call pptr_merge(self%particles(o_ix), self%particles(o_nn_ix), self%rng)
+          call pptr_merge(self%particles(o_ix), self%particles(o_nn_ix), &
+               part_out(1), self%rng)
+          self%particles(o_ix) = part_out(1)
           call self%remove_part(o_nn_ix)
           already_merged((/ix, neighbor_ix/)) = .true.
        end do
@@ -898,37 +967,35 @@ contains
     do ix = num_part - num_split + 1, num_part
        ! Change part_copy(ix), then add an extra particle at then end of pl
        o_ix = part_ixs(ix)
-       new_ix = get_ix_new_particle(pl)
-       call pptr_split(self%particles(o_ix), self%particles(new_ix), self%rng)
+       call pptr_split(self%particles(o_ix), part_out(1:2), self%rng)
+       self%particles(o_ix) = part_out(1)
+       call self%add_part(part_out(2))
     end do
 
-    call PC_clean_up(pl)
+    call self%clean_up()
   end subroutine merge_and_split
 
   ! Merge two particles into part_a, should remove part_b afterwards
-  subroutine PC_merge_part_rxv(part_a, part_b, part_out, n_part_out, uni_01)
+  subroutine PC_merge_part_rxv(part_a, part_b, part_out, rng)
     type(PC_part_t), intent(in)    :: part_a, part_b
-    type(PC_part_t), intent(inout) :: part_out(:)
-    integer, intent(out)           :: n_part_out
-    real(dp), intent(in)           :: uni_01
+    type(PC_part_t), intent(out) :: part_out
+    type(RNG_t), intent(inout) :: rng
 
-    n_part_out = 1
-    if (uni_01 > part_a%w / (part_a%w + part_b%w)) then
-       part_out(1)%v      = part_b%v
-       part_out(1)%x      = part_b%x
+    if (rng%uni_01() > part_a%w / (part_a%w + part_b%w)) then
+       part_out%v      = part_b%v
+       part_out%x      = part_b%x
     else
-       part_out(1)%v      = part_a%v
-       part_out(1)%x      = part_a%x
+       part_out%v      = part_a%v
+       part_out%x      = part_a%x
     end if
-    part_out(1)%w = part_a%w + part_b%w
+    part_out%w = part_a%w + part_b%w
   end subroutine PC_merge_part_rxv
 
-  subroutine PC_split_part(part_a, part_out, n_part_out)
+  subroutine PC_split_part(part_a, part_out, rng)
     type(PC_part_t), intent(in)    :: part_a
-    type(PC_part_t), intent(inout) :: part_out(:)
-    integer, intent(out)           :: n_part_out
+    type(PC_part_t), intent(inout) :: part_out(2)
+    type(RNG_t), intent(inout)     :: rng
 
-    n_part_out    = 2
     part_out(1)   = part_a
     part_out(1)%w = 0.5_dp * part_out(1)%w
     part_out(2)   = part_out(1)
@@ -980,5 +1047,143 @@ contains
        end select
     end do
   end subroutine get_coeffs
+
+  subroutine PM_divideParticles(myrank, ntasks)
+      integer, intent(in) :: myrank, ntasks
+
+      integer :: ll, ix, rank, ierr, iMin, nPartBehind, nPartInInterval, nPartSend
+      integer :: tag, partCnt
+      integer :: nSends, nRecvs, sender, recver, meanNP
+      integer :: mpi_status(MPI_STATUS_SIZE)
+      integer :: nPartPerTask(0:ntasks-1), nPartPerIntervalPerTask(0:ntasks-1, 0:ntasks-1)
+      integer :: splitIx(-1:ntasks)
+      integer, parameter :: n_cells = 10000
+      integer, allocatable :: nPartPerCellIx(:)
+      real(dp), allocatable :: cellIxs(:)
+      real(dp) :: x_min, x_max, dx, inv_dx
+
+      ! print *, "Before divide ", myrank, " has ", nParticles, " particles"
+
+      ! Get the number of particles each task has
+      call MPI_ALLGATHER(nParticles, 1, MPI_integer, nPartPerTask, 1, MPI_integer, MPI_COMM_WORLD, ierr)
+
+      meanNP      = (sum(nPartPerTask) + ntasks - 1) / ntasks
+      allocate( nPartPerCellIx(n_cells) )
+      allocate( cellIxs(nParticles) )
+
+      nPartPerCellIx = 0
+
+      ! Set the cell indexes for the particles
+      do ll = 1, nParticles
+         ix                   = int((pList(ll)%x(1) - x_min) * inv_dx) + 1
+         cellIxs(ll)          = ix
+         nPartPerCellIx(ix)   = nPartPerCellIx(ix) + 1
+      end do
+
+      call MPI_ALLREDUCE(MPI_IN_PLACE, nPartPerCellIx, n_cells, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
+
+      call heapsortParticleByDbles(pList(1:nParticles), cellIxs)
+
+      ! Find the splitIx(:) s.t. task n will hold particles with ix > splitIx(n-1) and ix <= splitIx(n)
+      splitIx(-1)                   = 0
+      splitIx(ntasks)               = n_cells
+      rank                          = 0
+      nPartBehind                   = 0
+      nPartPerIntervalPerTask(:,:)  = 0
+      nPartInInterval               = 0
+
+      do ix = 1, n_cells
+         nPartInInterval = nPartInInterval + nPartPerCellIx(ix)
+
+         if (nPartInInterval >= meanNP .or. ix == n_cells) then
+            splitIx(rank)     = ix
+            nPartInInterval   = 0
+            partCnt           = 0
+
+            do ll = nPartBehind+1, nParticles
+               !                print *, ll, cellIxs(ll)
+               if (cellIxs(ll) <= ix) then
+                  partCnt = partCnt + 1
+               else
+                  exit
+               end if
+            end do
+
+            nPartPerIntervalPerTask(rank, myrank) = partCnt
+            nPartBehind       = nPartBehind + partCnt
+            rank              = rank + 1
+
+            if (rank == ntasks) exit
+         end if
+
+      end do
+
+      call MPI_ALLREDUCE(MPI_IN_PLACE, nPartPerIntervalPerTask, ntasks*ntasks, &
+           MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
+
+      ! Send particles to task that holds a region
+      nSends = 0
+      nRecvs = 0
+
+      do recver = 0, ntasks - 1
+
+         ! Receive the particles in tasks' region from all other tasks
+         if (myrank == recver) then
+
+            do sender = 0, ntasks - 1
+               if (sender == myrank) cycle ! Don't have to send to ourselves
+
+               nPartSend = nPartPerIntervalPerTask(recver, sender)
+
+               if (nPartSend > 0) then
+                  nRecvs = nRecvs + 1
+                  iMin   = nParticles + 1
+                  nParticles = nParticles + nPartSend
+                  call checkNumParticles(nParticles)
+                  tag    = sender
+
+                  !                   print *, myrank, ": receives", nPartSend, "from", sender, "iMin", iMin
+                  call MPI_RECV( pList(iMin), nPartSend, partTypeMPI, sender, tag, &
+                       & MPI_COMM_WORLD, mpi_status, ierr)
+               end if
+            end do
+
+
+         else ! Send particles to recver
+
+            nPartSend = nPartPerIntervalPerTask(recver, myrank)
+
+            if (nPartSend > 0) then
+               nSends      = nSends + 1
+               tag         = myrank
+
+               ! Find index of first particle to send
+               iMin        = sum( nPartPerIntervalPerTask(0:recver-1, myrank) ) + 1
+
+               !                print *, myrank, ": sends", nPartSend, "to", recver, "iMin", iMin
+               call MPI_SEND( pList(iMin), nPartSend, partTypeMPI, recver, tag, &
+                    & MPI_COMM_WORLD, ierr)
+
+               ! Mark the particles that we have send away as inactive
+               do ll = iMin, iMin + nPartSend - 1
+                  call killParticle(ll)
+               end do
+
+            end if
+         end if
+
+      end do
+
+      ! if (nRecvs > 0) call MPI_WAITALL(nRecvs, recvReqs, MPI_STATUSES_IGNORE, ierr)
+      call MPI_BARRIER(MPI_COMM_WORLD, ierr)
+
+      !       print *, "After divide ", myrank, " has ", nParticles, "nParticles (some dead)"
+      call removeDeadParticles()
+      ! print *, "After divide ", myrank, " has ", nParticles, " particles"
+
+      deallocate( nPartPerCellIx )
+      deallocate( cellIxs )
+
+   end subroutine PM_divideParticles
 
 end module m_particle_core
