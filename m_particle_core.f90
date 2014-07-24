@@ -83,22 +83,22 @@ module m_particle_core
   end type PC_t
 
   interface
-     subroutine if_ipart_oreal3(my_part, my_vec)
+     subroutine part_to_r3_p(my_part, my_vec)
        import
        type(PC_part_t), intent(in) :: my_part
        real(dp), intent(out)       :: my_vec(3)
-     end subroutine if_ipart_oreal3
+     end subroutine part_to_r3_p
 
-     real(dp) function if_freal_ipart(my_part)
+     real(dp) function part_to_r_f(my_part)
        import
        type(PC_part_t), intent(in) :: my_part
-     end function if_freal_ipart
+     end function part_to_r_f
 
-     logical function if_filter_func(my_part, real_args)
+     logical function part_to_logic_f(my_part, real_args)
        import
        type(PC_part_t), intent(in) :: my_part
        real(dp), intent(in) :: real_args(:)
-     end function if_filter_func
+     end function part_to_logic_f
   end interface
 
   ! Public types
@@ -110,6 +110,7 @@ module m_particle_core
   public :: PC_split_part
   public :: PC_v_to_en
   public :: PC_share_particles
+  public :: PC_reorder_by_bins
 
 contains
 
@@ -200,72 +201,74 @@ contains
     end do
   end subroutine PC_share_particles
 
-  subroutine PC_reorder_by_bins(pcs, bin_func, n_bins)
+  subroutine PC_reorder_by_bins(pcs, bin_func, n_bins, bin_func_args)
     use m_mrgrnk
     type(PC_t), intent(inout) :: pcs(:)
-    procedure(if_oint_ipart) :: bin_func
+    interface
+       integer function bin_func(my_part, r_args)
+         import
+         type(PC_part_t), intent(in) :: my_part
+         real(dp), intent(in) :: r_args(:)
+       end function bin_func
+    end interface
     integer, intent(in) :: n_bins
+    real(dp), intent(in) :: bin_func_args(:)
     integer, allocatable :: bin_counts(:,:)
     integer, allocatable :: bin_counts_sum(:)
-    integer, allocatable :: bin_divider(:)
     integer, allocatable :: bin_owner(:)
-    integer :: n, n_pc, n_avg
+    integer :: prev_num_part(size(pcs))
+    integer :: n, n_pc, n_avg, n_add, tmp_sum
+    integer :: ll, io, ib, ip, new_loc
+
+    type tmp_t
+       integer, allocatable :: ib(:)
+    end type tmp_t
+    type(tmp_t), allocatable :: pcs_bins(:)
 
     n_pc = size(pcs)
     n_avg = ceiling(sum(pcs(:)%n_part) / real(n_pc, dp))
-    max_n_part = maxval(pcs(:)%n_part)
 
     allocate(bin_counts(n_bins, n_pc))
     allocate(bin_counts_sum(n_bins))
-    allocate(bin_divider(0:n_pc))
-    allocate(bin_divider(n_bins))
+    allocate(bin_owner(n_bins))
+    allocate(pcs_bins(n_pc))
     bin_counts(:, :) = 0
 
     ! Get the counts in the bins for each pcs(ip)
     do ip = 1, n_pc
+       allocate(pcs_bins(ip)%ib(pcs(ip)%n_part))
        do ll = 1, pcs(ip)%n_part
-          ib = bin_func(pcs(ip)%particles(ll))
+          ib = bin_func(pcs(ip)%particles(ll), bin_func_args)
+          pcs_bins(ip)%ib(ll) = ib
           bin_counts(ib, ip) = bin_counts(ib, ip) + 1
        end do
     end do
 
     bin_counts_sum = sum(bin_counts, dim=2)
-
-    ib = 0
-    cum_sum = 0
-    ip = 1
+    tmp_sum        = 0
+    ip             = 1
 
     ! Set the owners of the bins
-    do
-       ib = ib + 1
-       cum_sum = cum_sum + bin_counts_sum(ib)
+    do ib = 1, n_bins
+       tmp_sum = tmp_sum + bin_counts_sum(ib)
        bin_owner(ib) = ip
-       
-       if (cum_sum >= n_avg) then
+       if (tmp_sum >= n_avg) then
           ip = ip + 1
-          cum_sum = 0
+          tmp_sum = 0
        end if
     end do
 
-    ! Set placement offset
-    do ib = 1, n_bins
-       do ip = 1, n_pc
-          offset(ib, ip) =
-       end do
-    end do
+    prev_num_part(:) = pcs(:)%n_part
 
-    allocate(add_cnt(n_bins, n_pc))
-    add_cnt = 0
-    
     do ip = 1, n_pc
-       do ll = 1, pcs(ip)%n_part
-          ib = bin_func(pcs(ip)%particles(ll))
+       do ll = 1, prev_num_part(ip)
+          ib = pcs_bins(ip)%ib(ll)
           io = bin_owner(ib)
-          if (io =/ ib) then
-             ! Insert at the right place at owner
-             add_cnt(ib, ip) = add_cnt(ib, ip) + 1
-             new_loc = offset(io, ip) + add_cnt(ib, ip)
+          if (io /= ip) then
+             ! Insert at owner
+             new_loc = pcs(io)%n_part + 1
              pcs(io)%particles(new_loc) = pcs(ip)%particles(ll)
+             pcs(io)%n_part = new_loc
              call LL_add(pcs(ip)%clean_list, ll)
           end if
        end do
@@ -273,6 +276,7 @@ contains
 
     do ip = 1, n_pc
        call clean_up(pcs(ip))
+       print *, ip, pcs(ip)%n_part
     end do
   end subroutine PC_reorder_by_bins
 
@@ -504,7 +508,7 @@ contains
 
   subroutine set_accel(self, accel_func)
     class(PC_t), intent(inout) :: self
-    procedure(if_ipart_oreal3) :: accel_func
+    procedure(part_to_r3_p) :: accel_func
     integer                   :: ll
     real(dp)                  :: new_accel(3)
 
@@ -525,7 +529,7 @@ contains
     use m_units_constants
     class(PC_t), intent(inout) :: self
     real(dp), intent(IN)      :: dt
-    procedure(if_ipart_oreal3) :: accel_func
+    procedure(part_to_r3_p) :: accel_func
     integer                   :: ll
     real(dp)                  :: new_accel(3)
 
@@ -539,7 +543,7 @@ contains
 
   subroutine clean_up(self)
     class(PC_t), intent(inout) :: self
-    integer :: ix_end, ix_clean
+    integer :: ix_end, ix_clean, n_part_prev
     logical :: success
 
     do
@@ -548,19 +552,15 @@ contains
        if (.not. success) exit
 
        ! Find the last "alive" particle in the list
-       do ix_end = self%n_part, 1, -1
+       n_part_prev = self%n_part
+       self%n_part = ix_clean-1 ! This is overridden if a replacement is found
+       do ix_end = n_part_prev, ix_clean+1, -1
           if (self%particles(ix_end)%w /= PC_dead_weight) then
+             self%particles(ix_clean) = self%particles(ix_end)
+             self%n_part = ix_end-1
              exit
-          else
-             self%n_part = self%n_part - 1
           end if
        end do
-
-       ! Fill in empty spot ix_clean, if it lies before n_part
-       if (ix_clean < self%n_part) then
-          self%particles(ix_clean) = self%particles(self%n_part)
-          self%n_part = self%n_part - 1
-       end if
     end do
   end subroutine clean_up
 
@@ -761,7 +761,7 @@ contains
   subroutine sort(self, sort_func)
     use m_mrgrnk
     class(PC_t), intent(inout)   :: self
-    procedure(if_freal_ipart)    :: sort_func
+    procedure(part_to_r_f)    :: sort_func
 
     integer                      :: ix, n_part
     integer, allocatable         :: part_ixs(:)
@@ -789,10 +789,10 @@ contains
        filter_args, x_values, y_values)
     use m_mrgrnk
     class(PC_t), intent(inout) :: self
-    procedure(if_freal_ipart)   :: hist_func
+    procedure(part_to_r_f)   :: hist_func
     real(dp), intent(in)        :: x_values(:)
     real(dp), intent(out)       :: y_values(:)
-    procedure(if_filter_func)   :: filter_func
+    procedure(part_to_logic_f)   :: filter_func
     real(dp), intent(in)        :: filter_args(:)
 
     integer                     :: ix, p_ix, o_ix, n_used, num_bins, n_part
@@ -871,7 +871,7 @@ contains
          type(RNG_t), intent(inout)   :: rng
        end subroutine pptr_split
     end interface
-    procedure(if_freal_ipart)    :: weight_func
+    procedure(part_to_r_f)    :: weight_func
 
     integer, parameter           :: num_neighbors = 1
     real(dp), parameter          :: large_ratio   = 1.5_dp, &
@@ -1047,143 +1047,5 @@ contains
        end select
     end do
   end subroutine get_coeffs
-
-  subroutine PM_divideParticles(myrank, ntasks)
-      integer, intent(in) :: myrank, ntasks
-
-      integer :: ll, ix, rank, ierr, iMin, nPartBehind, nPartInInterval, nPartSend
-      integer :: tag, partCnt
-      integer :: nSends, nRecvs, sender, recver, meanNP
-      integer :: mpi_status(MPI_STATUS_SIZE)
-      integer :: nPartPerTask(0:ntasks-1), nPartPerIntervalPerTask(0:ntasks-1, 0:ntasks-1)
-      integer :: splitIx(-1:ntasks)
-      integer, parameter :: n_cells = 10000
-      integer, allocatable :: nPartPerCellIx(:)
-      real(dp), allocatable :: cellIxs(:)
-      real(dp) :: x_min, x_max, dx, inv_dx
-
-      ! print *, "Before divide ", myrank, " has ", nParticles, " particles"
-
-      ! Get the number of particles each task has
-      call MPI_ALLGATHER(nParticles, 1, MPI_integer, nPartPerTask, 1, MPI_integer, MPI_COMM_WORLD, ierr)
-
-      meanNP      = (sum(nPartPerTask) + ntasks - 1) / ntasks
-      allocate( nPartPerCellIx(n_cells) )
-      allocate( cellIxs(nParticles) )
-
-      nPartPerCellIx = 0
-
-      ! Set the cell indexes for the particles
-      do ll = 1, nParticles
-         ix                   = int((pList(ll)%x(1) - x_min) * inv_dx) + 1
-         cellIxs(ll)          = ix
-         nPartPerCellIx(ix)   = nPartPerCellIx(ix) + 1
-      end do
-
-      call MPI_ALLREDUCE(MPI_IN_PLACE, nPartPerCellIx, n_cells, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
-
-      call heapsortParticleByDbles(pList(1:nParticles), cellIxs)
-
-      ! Find the splitIx(:) s.t. task n will hold particles with ix > splitIx(n-1) and ix <= splitIx(n)
-      splitIx(-1)                   = 0
-      splitIx(ntasks)               = n_cells
-      rank                          = 0
-      nPartBehind                   = 0
-      nPartPerIntervalPerTask(:,:)  = 0
-      nPartInInterval               = 0
-
-      do ix = 1, n_cells
-         nPartInInterval = nPartInInterval + nPartPerCellIx(ix)
-
-         if (nPartInInterval >= meanNP .or. ix == n_cells) then
-            splitIx(rank)     = ix
-            nPartInInterval   = 0
-            partCnt           = 0
-
-            do ll = nPartBehind+1, nParticles
-               !                print *, ll, cellIxs(ll)
-               if (cellIxs(ll) <= ix) then
-                  partCnt = partCnt + 1
-               else
-                  exit
-               end if
-            end do
-
-            nPartPerIntervalPerTask(rank, myrank) = partCnt
-            nPartBehind       = nPartBehind + partCnt
-            rank              = rank + 1
-
-            if (rank == ntasks) exit
-         end if
-
-      end do
-
-      call MPI_ALLREDUCE(MPI_IN_PLACE, nPartPerIntervalPerTask, ntasks*ntasks, &
-           MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
-
-      ! Send particles to task that holds a region
-      nSends = 0
-      nRecvs = 0
-
-      do recver = 0, ntasks - 1
-
-         ! Receive the particles in tasks' region from all other tasks
-         if (myrank == recver) then
-
-            do sender = 0, ntasks - 1
-               if (sender == myrank) cycle ! Don't have to send to ourselves
-
-               nPartSend = nPartPerIntervalPerTask(recver, sender)
-
-               if (nPartSend > 0) then
-                  nRecvs = nRecvs + 1
-                  iMin   = nParticles + 1
-                  nParticles = nParticles + nPartSend
-                  call checkNumParticles(nParticles)
-                  tag    = sender
-
-                  !                   print *, myrank, ": receives", nPartSend, "from", sender, "iMin", iMin
-                  call MPI_RECV( pList(iMin), nPartSend, partTypeMPI, sender, tag, &
-                       & MPI_COMM_WORLD, mpi_status, ierr)
-               end if
-            end do
-
-
-         else ! Send particles to recver
-
-            nPartSend = nPartPerIntervalPerTask(recver, myrank)
-
-            if (nPartSend > 0) then
-               nSends      = nSends + 1
-               tag         = myrank
-
-               ! Find index of first particle to send
-               iMin        = sum( nPartPerIntervalPerTask(0:recver-1, myrank) ) + 1
-
-               !                print *, myrank, ": sends", nPartSend, "to", recver, "iMin", iMin
-               call MPI_SEND( pList(iMin), nPartSend, partTypeMPI, recver, tag, &
-                    & MPI_COMM_WORLD, ierr)
-
-               ! Mark the particles that we have send away as inactive
-               do ll = iMin, iMin + nPartSend - 1
-                  call killParticle(ll)
-               end do
-
-            end if
-         end if
-
-      end do
-
-      ! if (nRecvs > 0) call MPI_WAITALL(nRecvs, recvReqs, MPI_STATUSES_IGNORE, ierr)
-      call MPI_BARRIER(MPI_COMM_WORLD, ierr)
-
-      !       print *, "After divide ", myrank, " has ", nParticles, "nParticles (some dead)"
-      call removeDeadParticles()
-      ! print *, "After divide ", myrank, " has ", nParticles, " particles"
-
-      deallocate( nPartPerCellIx )
-      deallocate( cellIxs )
-
-   end subroutine PM_divideParticles
 
 end module m_particle_core

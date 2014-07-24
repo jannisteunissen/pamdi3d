@@ -14,6 +14,7 @@ program test_m_particle_core
    integer, parameter         :: max_num_steps = 100
    integer, parameter         :: lkp_tbl_size  = 1000
    integer, parameter         :: num_lists = 12
+   integer, parameter :: n_bins = 100
    real(dp), parameter        :: delta_t       = 5.0e-9_dp
    real(dp), parameter        :: max_en_eV     = 1.0e-1_dp
    real(dp), parameter        :: neutral_dens  = 2.5e25_dp
@@ -21,6 +22,7 @@ program test_m_particle_core
    real(dp), parameter        :: init_accel(3) = (/0.0_dp, 0.0_dp, 1.0e12_dp/)
    real(dp)                   :: norm_cross_sec, mass_ratio
    real(dp)                   :: pos(3), vel(3), accel(3), weight
+   real(dp) :: bin_args(1)
    integer                    :: ll, step, num_colls, i
    type(CS_t), allocatable :: cross_secs(:)
    integer, parameter :: n_pc = 4
@@ -63,11 +65,13 @@ program test_m_particle_core
    end do
 
    call PC_share_particles(pmodels)
+   ! call PC_reorder_by_bins(pmodels, bin_func, n_bins, bin_args)
 
    do step = 1, max_num_steps
       print *, ""
       print *, "at step", step, " and time ", (step-1) * delta_t
       call print_stats()
+
       !$omp parallel do
       do i = 1, n_pc
          call pmodels(i)%advance(delta_t)
@@ -134,4 +138,13 @@ contains
       get_weight_2 = 2
    end function get_weight_2
 
-end program test_m_particle_core
+   integer function bin_func(my_part, bin_args)
+     type(PC_part_t), intent(in) :: my_part
+     real(dp), intent(in) :: bin_args(:)
+     real(dp) :: tmp
+     call random_number(tmp)
+     bin_func = 1 + tmp * n_bins
+     ! print *, bin_func
+   end function bin_func
+
+ end program test_m_particle_core
