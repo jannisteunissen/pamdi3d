@@ -41,6 +41,8 @@ module m_particle_core
      integer, public              :: n_part
      type(CS_coll_t), allocatable :: colls(:)
      integer                      :: n_colls
+     integer, allocatable, public :: ionization_colls(:)
+     integer, allocatable, public :: attachment_colls(:)
      type(LT_table_t)             :: rate_lt                ! Lookup table with collision rates
      real(dp)                     :: max_rate, inv_max_rate ! Maximum collision rate and inverse
      type(LL_int_head_t)          :: clean_list
@@ -136,7 +138,28 @@ contains
 
     call self%rng%set_seed((/1, 3, 3, 1337/))
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
+
+    call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
+    call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
   end subroutine initialize
+
+  subroutine get_colls_of_type(pc, ctype, ixs)
+    class(PC_t), intent(inout) :: pc
+    integer, intent(in) :: ctype
+    integer, intent(inout), allocatable :: ixs(:)
+    integer :: nn, i
+
+    nn = count(pc%colls(:)%type == ctype)
+    allocate(ixs(nn))
+
+    nn = 0
+    do i = 1, pc%n_colls
+       if (pc%colls(i)%type == ctype) then
+          nn = nn + 1
+          ixs(nn) = i
+       end if
+    end do
+  end subroutine get_colls_of_type
 
   subroutine destroy(self)
     class(PC_t), intent(inout) :: self
