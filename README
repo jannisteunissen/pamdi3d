@@ -1,5 +1,12 @@
 Compilation:
 
 $ make
+
+Running (sequential):
 $ ./pampi3d my_config_file.txt
 
+Running (parallel, N = number of tasks):
+$ mpirun -n N ./pampi3d my_config_file.txt
+
+You can also specify multiple configuration files, like:
+$ ./pampi3d cfg_base.txt cfg_1.txt
