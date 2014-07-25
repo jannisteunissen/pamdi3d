@@ -25,9 +25,11 @@ module m_particle_core
 
   integer, parameter  :: dp               = kind(0.0d0)
   real(dp), parameter :: PC_dead_weight   = -HUGE(1.0_dp)
+  ! This has to do with openmp. It's quite interesting. Ask me about it.
+  integer, parameter, public :: PC_max_num_coll = 100
 
   !> The particle type
-  type PC_part_t
+  type, public :: PC_part_t
      real(dp) :: x(3)
      real(dp) :: v(3)
      real(dp) :: a(3)
@@ -35,16 +37,15 @@ module m_particle_core
      real(dp) :: t_left   ! The time until the next timestep
   end type PC_part_t
 
-  type PC_t
-     private
+  type, public :: PC_t
      type(PC_part_t), allocatable :: particles(:)
-     integer, public              :: n_part
+     integer                      :: n_part
      type(CS_coll_t), allocatable :: colls(:)
      integer                      :: n_colls
-     integer, allocatable, public :: ionization_colls(:)
-     integer, allocatable, public :: attachment_colls(:)
-     type(LT_table_t)             :: rate_lt                ! Lookup table with collision rates
-     real(dp)                     :: max_rate, inv_max_rate ! Maximum collision rate and inverse
+     integer, allocatable         :: ionization_colls(:)
+     integer, allocatable         :: attachment_colls(:)
+     type(LT_table_t)             :: rate_lt
+     real(dp)                     :: max_rate, inv_max_rate
      type(LL_int_head_t)          :: clean_list
      real(dp)                     :: mass
      type(RNG_t)                  :: rng
@@ -75,6 +76,8 @@ module m_particle_core
      procedure, non_overridable :: compute_vector_sum
      procedure, non_overridable :: move_and_collide
      procedure, non_overridable :: set_coll_rates
+     procedure, non_overridable :: get_mean_energy
+     procedure, non_overridable :: get_coll_rates
 
      procedure, non_overridable :: merge_and_split
      procedure, non_overridable :: histogram
@@ -102,10 +105,6 @@ module m_particle_core
        real(dp), intent(in) :: real_args(:)
      end function part_to_logic_f
   end interface
-
-  ! Public types
-  public :: PC_part_t
-  public :: PC_t
 
   ! Public procedures
   public :: PC_merge_part_rxv
@@ -398,9 +397,6 @@ contains
     real(dp), intent(IN)         :: velocity, rand_unif, max_rate
     integer, intent(in)          :: n_colls
     real(dp)                     :: rand_rate
-    ! This has to do with openmp. It's quite interesting. Ask me about it.
-    integer, parameter           :: PC_max_num_coll = 100
-    ! real(dp)                   :: buffer(n_colls)
     real(dp)                     :: buffer(PC_max_num_coll)
 
     ! Fill an array with interpolated rates
@@ -1028,6 +1024,32 @@ contains
     class(PC_t), intent(in) :: self
     get_num_colls = self%n_colls
   end function get_num_colls
+
+  function get_mean_energy(self) result(mean_en)
+    class(PC_t), intent(in) :: self
+    real(dp)                :: mean_en, weight
+    integer                 :: ll
+    mean_en = 0
+    weight  = 0
+    do ll = 1, self%n_part
+       weight  = weight + self%particles(ll)%w
+       mean_en = mean_en + self%particles(ll)%w * &
+            PC_v_to_en(self%particles(ll)%v, self%mass)
+    end do
+    mean_en = mean_en / weight
+  end function get_mean_energy
+
+  subroutine get_coll_rates(self, velocity, coll_rates)
+    class(PC_t), intent(in) :: self
+    real(dp), intent(in) :: velocity
+    real(dp), intent(inout) :: coll_rates(:)
+    integer :: i
+    coll_rates = LT_get_mcol(self%rate_lt, velocity)
+
+    do i = size(coll_rates), 2, -1
+       coll_rates(i) = coll_rates(i) - coll_rates(i-1)
+    end do
+  end subroutine get_coll_rates
 
   subroutine get_colls(self, out_colls)
     class(PC_t), intent(in) :: self
