@@ -42,9 +42,9 @@ module module_photoionization
 contains
 
    subroutine MISC_initialize()
-      use module_gas
-      use module_constants
-      use module_config
+      use m_gas
+      use m_units_constants
+      use m_config
 
       MISC_tau_excited = CFG_varDble("PI_meanLifeTimeExcited")
 
@@ -80,7 +80,6 @@ contains
    end subroutine MISC_initialize
 
    real(dp) function findPhotoEff(E_f)
-      use generalUtilities
       ! Returns the photo-efficiency coefficient corresponding to an electric
       ! field of strength E_f
       real(dp), intent(IN) :: E_f
@@ -112,8 +111,6 @@ contains
 
    subroutine update_excited(amr_grid)
       use m_efield_amr
-      use module_kiss
-      use module_particle
 
       type(amr_grid_t), intent(inout) :: amr_grid
       real(dp), allocatable           :: loss(:,:,:)
@@ -193,8 +190,7 @@ contains
 
    subroutine update_detachment(amr_grid)
       use m_efield_amr
-      use module_kiss
-      use module_particle
+      use m_particle
 
       type(amr_grid_t), intent(inout) :: amr_grid
       real(dp), allocatable           :: loss(:,:,:)
@@ -256,8 +252,8 @@ contains
    end subroutine update_detachment
 
    real(dp) function MISC_get_O2m_loss(O2min_dens, e_str)
-      use module_gas
-      use module_constants
+      use m_gas
+      use m_units_constants
       real(dp), intent(in) :: O2min_dens, e_str
       real(dp) :: T_eff
 

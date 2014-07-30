@@ -29,10 +29,10 @@ module m_efield_amr
    integer, parameter :: E_i_pot  = 1, E_i_pion = 2, E_i_elec = 3, &
         E_i_nion = 4, E_i_O2m  = 5, E_i_exc  = 6, E_i_src  = 7, &
         E_i_Ex   = 8, E_i_Ey   = 9, E_i_Ez   = 10, E_i_tmp = 11, E_n_vars = 11
-   character(len=*), parameter :: E_var_names(*) = &
-        (/"pot ", "pion", "elec", "nion", "O2m ", "exc ", "src ", "Ex  ", "Ey  ", "Ez  ", "E   "/)
-   character(len=*), parameter :: E_var_units(*) = &
-        (/"V   ", "1_m3", "1_m3", "1_m3", "1_m3", "1_m3", "1_m3", "V_m ", "V_m ", "V_m ", "V_m "/)
+   character(len=*), parameter :: E_var_names(*) = (/"pot ", "pion", "elec", &
+        "nion", "O2m ", "exc ", "src ", "Ex  ", "Ey  ", "Ez  ", "E   "/)
+   character(len=*), parameter :: E_var_units(*) = (/"V   ", "1_m3", "1_m3", &
+        "1_m3", "1_m3", "1_m3", "1_m3", "V_m ", "V_m ", "V_m ", "V_m "/)
 
    integer  :: E_min_grid_size
    integer  :: E_bc_type
@@ -71,6 +71,7 @@ module m_efield_amr
    public :: E_get_var
    public :: E_get_var_x_dr
    public :: E_get_field
+   public :: E_get_accel_part
    public :: E_get_dr
    public :: E_get_max_of_vars
    public :: E_collect_mpi
@@ -86,28 +87,25 @@ module m_efield_amr
 contains
 
    subroutine E_initialize()
-      use module_config
-      integer             :: gridSize(3), varSize
-      real(dp)            :: gridLength(3)
+      use m_config
+      use m_phys_domain
+      integer             :: varSize
 
-      call CFG_getVar("grid_size", gridSize)
-      call CFG_getVar("grid_delta", gridLength)
-      gridLength = gridLength * (gridSize - 1)
       call CFG_getVar("ref_min_grid_size", E_min_grid_size)
       call CFG_getVar("ref_min_grid_separation", E_min_grid_separation)
-      E_ref_lvl_electrode = CFG_varInt("ref_min_lvl_electrode")
+      E_ref_lvl_electrode = CFG_get_int("ref_min_lvl_electrode")
 
-      varSize = CFG_getSize("sim_efield_times")
+      varSize = CFG_get_size("sim_efield_times")
       allocate(E_efield_times(varSize))
       allocate(E_efield_values(varSize))
       call CFG_getVar("sim_efield_values", E_efield_values)
       call CFG_getVar("sim_efield_times", E_efield_times)
 
-      E_bc_type      = CFG_varInt("elec_boundaryType")
-      E_useElectrode = CFG_varLogic("sim_useElectrode")
-      varSize        = CFG_getSize("ref_deltaValues")
+      E_bc_type      = CFG_get_int("elec_boundaryType")
+      E_useElectrode = CFG_get_logic("sim_useElectrode")
+      varSize        = CFG_get_size("ref_deltaValues")
 
-      if (varSize /= CFG_getSize("ref_maxEfieldAtDelta")) then
+      if (varSize /= CFG_get_size("ref_maxEfieldAtDelta")) then
          print *, "Make sure ref_EfieldValues and ref_deltaValues have the same size"
          stop
       end if
@@ -121,11 +119,11 @@ contains
       call CFG_getVar("ref_buffer_width", E_grid_buffer_width)
       call CFG_getVar("grid_plasma_min_rel_pos", E_ref_min_xyz)
       call CFG_getVar("grid_plasma_max_rel_pos", E_ref_max_xyz)
-      E_ref_min_xyz = E_ref_min_xyz * gridLength
-      E_ref_max_xyz = E_ref_max_xyz * gridLength
+      E_ref_min_xyz = E_ref_min_xyz * PD_r_max
+      E_ref_max_xyz = E_ref_max_xyz * PD_r_max
 
       allocate(root_grid)
-      call set_grid(root_grid, 0, gridSize, (/0.0_dp, 0.0_dp, 0.0_dp/), gridLength)
+      call set_grid(root_grid, 0, PD_size, (/0.0_dp, 0.0_dp, 0.0_dp/), PD_r_max)
    end subroutine E_initialize
 
    subroutine E_benchmark()
@@ -193,8 +191,8 @@ contains
    end subroutine set_grid
 
    subroutine E_adjust_electrode(myrank, root, time)
-      use module_electrode
-      use module_constants
+      use m_electrode
+      use m_units_constants
       integer, intent(in)   :: myrank, root
       real(dp), intent(in)  :: time
       integer               :: ix, nElecPoints
@@ -215,7 +213,7 @@ contains
 
          do ix = 1, nElecPoints
             call EL_getSurfacePoint(ix, xyz)
-            call E_add_to_var(E_i_src, xyz, elecChargeOverEps0)
+            call E_add_to_var(E_i_src, xyz, UC_elec_q_over_eps0)
          end do
 
          call compute_potential_recursive(root_grid, time, .true.)
@@ -263,8 +261,8 @@ contains
    end subroutine sync_grid_structure_recursive
 
    subroutine E_readjust_electrode_new_grid(myrank, root, time, cntr)
-      use module_electrode
-      use module_constants
+      use m_electrode
+      use m_units_constants
       use mpi
       real(dp), intent(in) :: time
       integer, intent(in)  :: myrank, root
@@ -300,7 +298,7 @@ contains
                call EL_getSurfacePoint(ix, xyz)
                voltage_diff = voltage - E_get_var(E_i_pot, xyz)
                newCharge    = EL_getCharge(ix) + voltage_diff * &
-                    EL_getWeightFactor(ix) * elecChargeOverEps0
+                    EL_getWeightFactor(ix) * UC_elec_q_over_eps0
                call EL_setCharge(ix, newCharge)
 
                call E_add_to_var(E_i_src, xyz, newCharge)
@@ -312,7 +310,7 @@ contains
    end subroutine E_readjust_electrode_new_grid
 
    subroutine check_elec_voltage(time, max_diff)
-      use module_electrode
+      use m_electrode
       real(dp), intent(in) :: time
       real(dp), intent(out) :: max_diff
       integer :: ix, nElecPoints
@@ -335,8 +333,8 @@ contains
    end subroutine check_elec_voltage
 
    subroutine E_compute_field(myrank, root, time)
-      use module_electrode
-      use module_constants
+      use m_electrode
+      use m_units_constants
       real(dp), intent(in) :: time
       integer, intent(in)  :: myrank, root
       integer              :: ix, nElecPoints
@@ -357,7 +355,7 @@ contains
             do ix = 1, nElecPoints
                call EL_getSurfacePoint(ix, xyz)
                voltage_diff = voltage - E_get_var(E_i_pot, xyz)
-               newCharge    = EL_getCharge(ix) + voltage_diff * EL_getWeightFactor(ix) * elecChargeOverEps0
+               newCharge    = EL_getCharge(ix) + voltage_diff * EL_getWeightFactor(ix) * UC_elec_q_over_eps0
                call EL_setCharge(ix, newCharge)
                call E_add_to_var(E_i_src, xyz, newCharge)
             end do
@@ -543,8 +541,7 @@ contains
    end subroutine E_update_grids
 
    logical function need_to_refine(amr_grid, ix)
-      use generalUtilities
-      use module_electrode
+      use m_electrode
       type(amr_grid_t), intent(in) :: amr_grid
       integer, intent(in)          :: ix(3)
       real(dp)                     :: xyz(3)
@@ -783,8 +780,7 @@ contains
    end function E_xyz_to_ix
 
    subroutine set_bc_dirichlet(amr_grid, time)
-      use module_electrode
-      use generalUtilities
+      use m_electrode
 
       type(amr_grid_t), intent(inout) :: amr_grid
       real(dp), intent(in)            :: time
@@ -1019,6 +1015,15 @@ contains
       field = get_vars(root_grid, (/E_i_Ex, E_i_Ey, E_i_Ez/), xyz)
    end function E_get_field
 
+   function E_get_accel_part(my_part) result(accel)
+     use m_particle_core
+     use m_units_constants
+     type(PC_part_t), intent(in) :: my_part
+     real(dp)                    :: field(3), accel(3)
+     field = get_vars(root_grid, (/E_i_Ex, E_i_Ey, E_i_Ez/), my_part%x)
+     accel = field * UC_elec_q_over_m
+   end function E_get_accel_part
+
    real(dp) function E_get_var_x_dr(v_ix, xyz)
       real(dp), intent(in) :: xyz(3)
       integer, intent(in)  :: v_ix
@@ -1184,13 +1189,13 @@ contains
    end subroutine set_vars_recursive
 
    recursive subroutine set_source_term_recursive(amr_grid)
-      use module_constants
+      use m_units_constants
       type(amr_grid_t), intent(inout) :: amr_grid
       integer                         :: nc
 
       amr_grid%vars(:,:,:, E_i_src) = (amr_grid%vars(:,:,:, E_i_elec) &
            + amr_grid%vars(:,:,:, E_i_O2m) + amr_grid%vars(:,:,:, E_i_nion) &
-           - amr_grid%vars(:,:,:, E_i_pion)) * abs(elecChargeOverEps0)
+           - amr_grid%vars(:,:,:, E_i_pion)) * abs(UC_elec_q_over_eps0)
 
       do nc = 1, amr_grid%n_child
          call set_source_term_recursive(amr_grid%children(nc))
