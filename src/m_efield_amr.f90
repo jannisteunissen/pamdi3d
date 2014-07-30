@@ -91,15 +91,15 @@ contains
       use m_phys_domain
       integer             :: varSize
 
-      call CFG_getVar("ref_min_grid_size", E_min_grid_size)
-      call CFG_getVar("ref_min_grid_separation", E_min_grid_separation)
+      call CFG_get("ref_min_grid_size", E_min_grid_size)
+      call CFG_get("ref_min_grid_separation", E_min_grid_separation)
       E_ref_lvl_electrode = CFG_get_int("ref_min_lvl_electrode")
 
       varSize = CFG_get_size("sim_efield_times")
       allocate(E_efield_times(varSize))
       allocate(E_efield_values(varSize))
-      call CFG_getVar("sim_efield_values", E_efield_values)
-      call CFG_getVar("sim_efield_times", E_efield_times)
+      call CFG_get("sim_efield_values", E_efield_values)
+      call CFG_get("sim_efield_times", E_efield_times)
 
       E_bc_type      = CFG_get_int("elec_boundaryType")
       E_useElectrode = CFG_get_logic("sim_useElectrode")
@@ -111,14 +111,14 @@ contains
       end if
 
       allocate( E_dr_vs_efield(2, varSize) )
-      call CFG_getVar("ref_deltaValues", E_dr_vs_efield(1, :))
-      call CFG_getVar("ref_maxEfieldAtDelta", E_dr_vs_efield(2, :))
+      call CFG_get("ref_deltaValues", E_dr_vs_efield(1, :))
+      call CFG_get("ref_maxEfieldAtDelta", E_dr_vs_efield(2, :))
 
-      call CFG_getVar("ref_MinElecDens", E_ref_min_elec_dens)
-      call CFG_getVar("ref_maxLevels", E_ref_max_lvl)
-      call CFG_getVar("ref_buffer_width", E_grid_buffer_width)
-      call CFG_getVar("grid_plasma_min_rel_pos", E_ref_min_xyz)
-      call CFG_getVar("grid_plasma_max_rel_pos", E_ref_max_xyz)
+      call CFG_get("ref_MinElecDens", E_ref_min_elec_dens)
+      call CFG_get("ref_maxLevels", E_ref_max_lvl)
+      call CFG_get("ref_buffer_width", E_grid_buffer_width)
+      call CFG_get("grid_plasma_min_rel_pos", E_ref_min_xyz)
+      call CFG_get("grid_plasma_max_rel_pos", E_ref_max_xyz)
       E_ref_min_xyz = E_ref_min_xyz * PD_r_max
       E_ref_max_xyz = E_ref_max_xyz * PD_r_max
 
@@ -495,10 +495,17 @@ contains
       end do
    end subroutine mpi_share_recursive
 
-   subroutine E_loop_over_grids(func_p)
+   subroutine E_loop_over_grids(pc, rng, func_p)
+     use m_particle_core
+     use m_random
+     type(PC_t), intent(inout) :: pc
+     type(RNG_t), intent(inout) :: rng
+            
       interface
-         subroutine func_p(ag)
+         subroutine func_p(pc, rng, ag)
             import
+            type(PC_t), intent(inout) :: pc
+            type(RNG_t), intent(inout) :: rng
             type(amr_grid_t), intent(inout) :: ag
          end subroutine func_p
       end interface
@@ -508,7 +515,7 @@ contains
 
       call create_grid_list(root_grid, grid_list)
       do ix = 1, size(grid_list)
-         call func_p(grid_list(ix)%ptr)
+         call func_p(pc, rng, grid_list(ix)%ptr)
       end do
    end subroutine E_loop_over_grids
 

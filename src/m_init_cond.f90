@@ -26,16 +26,15 @@ module m_init_cond
 contains
 
    !> Sets up the initial particles for a simulation
-  subroutine IC_set_init_cond(rng, grid_length)
+  subroutine IC_set_init_cond(rng)
     use m_efield_amr
     use m_random
     use m_config
     use m_phys_domain
     type(RNG_t), intent(inout) :: rng
-    real(dp), intent(in) :: grid_length(3)
     character(LEN=40)      :: initCond
     logical                :: success
-    integer                :: ll, i, j, k, ix
+    integer                :: ll, ix
     integer                ::  initWeight, nBackgroundPairs
     real(dp)               :: electronEnergy, radius, nIonPairs
     real(dp)               :: temp
@@ -57,11 +56,11 @@ contains
     call E_set_vars((/E_i_O2m, E_i_pion/), (/bgO2MinDensity, bgO2MinDensity/))
 
     ! Set the background ionization level
-    nBackgroundPairs = int(backgroundDensity * product(grid_length))
+    nBackgroundPairs = int(backgroundDensity * product(PD_r_max))
     print *, "Background density creates:", nBackgroundPairs
     do ll = 1, nBackgroundPairs
        pos = (/rng%uni_01(), rng%uni_01(), rng%uni_01()/)
-       pos = pos * grid_length
+       pos = pos * PD_r_max
        if (.not. PD_outside_domain(pos)) call createIonPair(pos, electronEnergy, 1)
     end do
 
@@ -75,7 +74,7 @@ contains
        ! Electron/ion pairs start at fixed position
        call CFG_getVar("init_relSeedPos", initSeedPos)
        do ll = 1, int (nIonPairs / initWeight)
-          pos = initSeedPos * grid_length
+          pos = initSeedPos * PD_r_max
           call createIonPair(pos, electronEnergy, initWeight)
        end do
 
@@ -85,13 +84,13 @@ contains
        radius = CFG_get_real("init_seedPosRadius")
 
        do ll = 1, int(nIonPairs / (2 * initWeight))
-          pos = initSeedPos * grid_length
+          pos = initSeedPos * PD_r_max
           pos(1) = pos(1) - radius
           call createIonPair(pos, electronEnergy, initWeight)
        end do
 
        do ll = 1, int(nIonPairs / (2 * initWeight))
-          pos = initSeedPos * grid_length
+          pos = initSeedPos * PD_r_max
           pos(1) = pos(1) + radius
           call createIonPair(pos, electronEnergy, initWeight)
        end do
@@ -101,7 +100,7 @@ contains
        ! with mean initSeedPos and sigma init_seedPosRadius
        radius = CFG_get_real("init_seedPosRadius")
        call CFG_getVar("init_relSeedPos", initSeedPos)
-       initSeedPos = initSeedPos * grid_length
+       initSeedPos = initSeedPos * PD_r_max
 
        do ll = 1, int (nIonPairs / initWeight)
           success = .false.
@@ -154,7 +153,7 @@ contains
           if (temp > 0 .and. temp < maxfac) maxfac = temp
        end do
 
-       lineLen = norm2((maxFac - minFac) * lineDirection * grid_length)
+       lineLen = norm2((maxFac - minFac) * lineDirection * PD_r_max)
        temp = CFG_get_real("init_lineDens")
        nIonPairs = temp * radius**2 * lineLen
 
@@ -163,7 +162,7 @@ contains
 
        do ll = 1, int(nIonPairs/initWeight)
           pos = (rng%uni_01() * (maxFac-minFac) + minFac) * lineDirection + lineBase
-          pos = pos * grid_length
+          pos = pos * PD_r_max
           pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec1
           pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec2
           !                print *, ll, pos
@@ -175,7 +174,7 @@ contains
        ! with mean initSeedPos and sigma init_seedPosRadius
        radius = CFG_get_real("init_seedPosRadius")
        call CFG_getVar("init_relSeedPos", initSeedPos)
-       initSeedPos = initSeedPos * grid_length
+       initSeedPos = initSeedPos * PD_r_max
 
        do ll = 1, int (nIonPairs / initWeight)
           success = .false.

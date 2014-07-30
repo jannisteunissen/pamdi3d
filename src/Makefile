@@ -3,9 +3,10 @@ FFLAGS	:= -Wall -fcheck=all -ffpe-trap=invalid,zero,overflow -g -O3
 OBJS	:= m_particle.o m_efield_amr.o m_init_cond.o m_electrode.o\
 	 m_write_silo.o m_misc_process.o m_phys_domain.o
 
-INCDIRS	:= ../../fosito ../../particle_core ../pamdi3d_libs/silo_lib/include
-LIBDIRS := ../../fosito ../../particle_core
-LIBS	:= part_core fosito
+INCDIRS	:= ../../fosito ../../particle_core\
+ ../pamdi3d_libs/silo_lib/include
+LIBDIRS := ../../fosito ../../particle_core  ../pamdi3d_libs/fishpack4.1/lib
+LIBS	:= particle_core fosito fishpack
 
 %.o: 	%.f90
 	$(FC) -c -o $@ $< $(FFLAGS) $(addprefix -I,$(INCDIRS))
@@ -25,3 +26,4 @@ clean:
 m_particle.o:		m_efield_amr.o
 m_efield_amr.o:		m_electrode.o m_write_silo.o m_phys_domain.o
 m_init_cond.o:		m_efield_amr.o
+m_misc_process.o:	m_particle.o

@@ -9,6 +9,9 @@ module m_particle
   ! Public methods
   public :: PM_particles_to_density
   public :: PM_fld_error
+  public :: PM_get_num_part_mpi
+  public :: PM_divide_particles
+  public :: PM_get_max_dt
 
 contains
 
@@ -70,8 +73,28 @@ contains
     end do
   end subroutine PM_particles_to_density
 
+  integer function PM_get_num_part_mpi(pc)
+    use mpi
+    use m_particle_core
+    type(PC_t), intent(in) :: pc
+    integer :: ierr, n_part_sum
+
+    n_part_sum = pc%n_part
+    call MPI_ALLREDUCE(n_part_sum, PM_get_num_part_mpi, 1, MPI_integer, MPI_SUM, &
+         MPI_COMM_WORLD, ierr)
+  end function PM_get_num_part_mpi
+
+  function PM_get_max_dt(pc, myrank, root) result(dt_max)
+    type(PC_t), intent(in) :: pc
+    integer, intent(in) :: myrank, root
+    real(dp) :: dt_max
+    ! Do something with cfl..
+    print *, "TODO CFL"
+    dt_max = 1.0e-12_dp
+  end function PM_get_max_dt
+
   ! Divide the particles over the tasks based on their cell index
-  subroutine PM_divideParticles(pc, myrank, ntasks)
+  subroutine PM_divide_particles(pc, myrank, ntasks)
     include 'mpif.h'
     type(PC_t), intent(inout) :: pc
     integer, intent(in) :: myrank, ntasks
@@ -83,9 +106,12 @@ contains
     integer :: n_part_task(0:ntasks-1)
     integer :: n_part_interval_task(0:ntasks-1, 0:ntasks-1)
     integer :: splitIx(-1:ntasks)
+    integer :: rel_size_part_t, max_buf_size, req_buf_size
     integer, parameter :: n_cells = 10000
     integer, allocatable :: nPartPerCellIx(:)
     real(dp), allocatable :: cellIxs(:)
+    real(dp), allocatable :: r_buf(:)
+    type(PC_part_t) :: part_temp(1)
     real(dp) :: x_min, x_max, dx, inv_dx
 
     ! print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
@@ -163,6 +189,19 @@ contains
     n_sends = 0
     n_recvs = 0
 
+    ! We use a buffer because we cannot send the type directly with Fortran MPI
+    rel_size_part_t = storage_size(part_temp(1)) / storage_size(1.0_dp)
+    if (rel_size_part_t * storage_size(1.0_dp) /= storage_size(part_temp(1))) then
+       print *, "PC_part_t has size not divisible by size of double prec."
+       stop
+    end if
+
+    max_buf_size = rel_size_part_t * max(&
+         maxval(n_part_interval_task(myrank, :)), &
+         maxval(n_part_interval_task(:, myrank)))
+    allocate(r_buf(max_buf_size))
+    print *, "Max buf size", max_buf_size
+
     do recver = 0, ntasks - 1
 
        ! Receive the particles in tasks' region from all other tasks
@@ -172,23 +211,27 @@ contains
              if (sender == myrank) cycle ! Don't have to send to ourselves
 
              n_send = n_part_interval_task(recver, sender)
+             req_buf_size = n_send * rel_size_part_t
 
              if (n_send > 0) then
                 n_recvs = n_recvs + 1
+                tag    = sender
+
+                print *, myrank, ": receives", n_send, "from", sender, "iMin", iMin
+                call MPI_RECV(r_buf, req_buf_size, MPI_DOUBLE_PRECISION, sender, tag, &
+                     & MPI_COMM_WORLD, mpi_status, ierr)
                 iMin   = pc%n_part + 1
                 pc%n_part = pc%n_part + n_send
                 call checkNumParticles(pc%n_part)
-                tag    = sender
-
-                !                   print *, myrank, ": receives", n_send, "from", sender, "iMin", iMin
-                call MPI_RECV( pc%particles(iMin), n_send, partTypeMPI, sender, tag, &
-                     & MPI_COMM_WORLD, mpi_status, ierr)
+                pc%particles(iMin:iMin+n_send-1) = &
+                     transfer(r_buf(1:req_buf_size), part_temp, n_send)
              end if
           end do
 
 
        else ! Send particles to recver
           n_send = n_part_interval_task(recver, myrank)
+          req_buf_size = n_send * rel_size_part_t
 
           if (n_send > 0) then
              n_sends      = n_sends + 1
@@ -197,13 +240,15 @@ contains
              ! Find index of first particle to send
              iMin        = sum( n_part_interval_task(0:recver-1, myrank) ) + 1
 
-             !                print *, myrank, ": sends", n_send, "to", recver, "iMin", iMin
-             call MPI_SEND( pc%particles(iMin), n_send, partTypeMPI, recver, tag, &
+             print *, myrank, ": sends", n_send, "to", recver, "iMin", iMin
+             r_buf(1:req_buf_size) = transfer(pc%particles(iMin:iMin+n_send-1), &
+                  r_buf, req_buf_size)
+             call MPI_SEND(r_buf, req_buf_size, MPI_DOUBLE_PRECISION, recver, tag, &
                   & MPI_COMM_WORLD, ierr)
 
              ! Mark the particles that we have send away as inactive
              do ll = iMin, iMin + n_send - 1
-                call killParticle(ll)
+                call LL_add(pc%clean_list, ll)
              end do
 
           end if
@@ -215,9 +260,9 @@ contains
     call MPI_BARRIER(MPI_COMM_WORLD, ierr)
 
     !       print *, "After divide ", myrank, " has ", pc%n_part, "pc%n_part (some dead)"
-    call removeDeadParticles()
+    call pc%clean_up()
     ! print *, "After divide ", myrank, " has ", pc%n_part, " particles"
 
-  end subroutine PM_divideParticles
+  end subroutine PM_divide_particles
 
 end module m_particle

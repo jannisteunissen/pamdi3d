@@ -42,11 +42,11 @@ contains
   !> Generates a list of points that lie on the electrode surface, where we want to have the electrode potential.
   !!
   !! Currently this list of point remains constant during the simulation.
-  subroutine EL_initialize(grid_length, rng, myrank, root)
+  subroutine EL_initialize(rng, myrank, root)
     use m_config
     use m_random
+    use m_phys_domain
     type(RNG_t), intent(inout) :: rng
-    real(dp), intent(in) :: grid_length(3)
     integer, intent(in) :: myrank, root
     real(dp) :: H_cone_eff
     integer :: n_time_points
@@ -65,9 +65,9 @@ contains
     call CFG_getVar("electrode_xyzRelPos", EL_xyzPos)
     EL_topAngle  = atan(EL_Rcyl / EL_Hcone)
     H_cone_eff = EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - 1.0D0)
-    EL_Hcyl      = EL_xyzPos(3) * grid_length(3) - H_cone_eff - EL_spacing
+    EL_Hcyl      = EL_xyzPos(3) * PD_r_max(3) - H_cone_eff - EL_spacing
     EL_topZ      = EL_Hcyl + H_cone_eff
-    EL_xyzPos    = EL_xyzPos * grid_length - (/0.0d0, 0.0d0, EL_topZ/)
+    EL_xyzPos    = EL_xyzPos * PD_r_max - (/0.0d0, 0.0d0, EL_topZ/)
 
     ! Determine the transitions between rounded and straight parts
     EL_TransCurveStartZ = EL_Hcyl - EL_RcTrans * tan(EL_topAngle/2.0D0)

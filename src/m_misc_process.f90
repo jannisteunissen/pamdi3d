@@ -13,7 +13,7 @@
 ! You should have received a copy of the GNU General Public License
 ! along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-module module_photoionization
+module m_misc_process
 
    implicit none
    private
@@ -46,28 +46,28 @@ contains
       use m_units_constants
       use m_config
 
-      MISC_tau_excited = CFG_varDble("PI_meanLifeTimeExcited")
+      MISC_tau_excited = CFG_get_real("PI_meanLifeTimeExcited")
 
-      MISC_frac_O2 = getGasFraction("O2")
+      MISC_frac_O2 = GAS_get_fraction("O2")
 
-      if (MISC_frac_O2 <= smallNumber) then
+      if (MISC_frac_O2 <= epsilon(1.0_dp)) then
          print *, "There is no oxygen, you should disable photoionzation"
          stop
       end if
 
-      MISC_O2_bgdens = GAS_numberDensity * getGasFraction("O2")
-      MISC_N2_bgdens = GAS_numberDensity * getGasFraction("N2")
+      MISC_O2_bgdens = GAS_get_number_dens() * GAS_get_fraction("O2")
+      MISC_N2_bgdens = GAS_get_number_dens() * GAS_get_fraction("N2")
 
-      MISC_min_inv_abs_len = CFG_varDble("PI_absorpInvLengths",1) * MISC_frac_O2 * GAS_pressure
-      MISC_max_inv_abs_len = CFG_varDble("PI_absorpInvLengths",2) * MISC_frac_O2 * GAS_pressure
+      MISC_min_inv_abs_len = CFG_get_real("PI_absorpInvLengths",1) * MISC_frac_O2 * GAS_get_pressure()
+      MISC_max_inv_abs_len = CFG_get_real("PI_absorpInvLengths",2) * MISC_frac_O2 * GAS_get_pressure()
 
       print *, "Max absorbp. length for photoionization ", 1.0d3 / MISC_min_inv_abs_len, "mm"
       print *, "Min absorbp. length for photoionization ", 1.0d3 / MISC_max_inv_abs_len, "mm"
 
-      MISC_quench_fac = (30.0D0 * TorrToBar) / (GAS_pressure + (30.0D0 * TorrToBar))
-      MISC_table_size = CFG_getSize("PI_EfieldTable")
+      MISC_quench_fac = (30.0D0 * UC_torr_to_bar) / (GAS_get_pressure() + (30.0D0 * UC_torr_to_bar))
+      MISC_table_size = CFG_get_size("PI_EfieldTable")
 
-      if (MISC_table_size /= CFG_getSize("PI_efficiencyTable")) then
+      if (MISC_table_size /= CFG_get_size("PI_efficiencyTable")) then
          print *, "Make sure MISC_efficiencyTable and MISC_EfieldTable have the same size"
          stop
       end if
@@ -92,8 +92,12 @@ contains
       Pho_kf = MISC_min_inv_abs_len * (MISC_max_inv_abs_len/MISC_min_inv_abs_len)**energy_frac
    end function
 
-   subroutine MISC_photoionization(dt, myrank, root)
+   subroutine MISC_photoionization(pc, rng, dt, myrank, root)
       use m_efield_amr
+      use m_particle_core
+      use m_random
+      type(PC_t), intent(inout) :: pc
+      type(RNG_t), intent(inout) :: rng
       real(dp), intent(in) :: dt
       integer, intent(in)  :: myrank, root
 
@@ -104,14 +108,18 @@ contains
       call E_collect_mpi((/E_i_exc/), myrank, root)
 
       if (myrank == root) then
-         call E_loop_over_grids(update_excited)
+         call E_loop_over_grids(pc, rng, update_excited)
          print *, "Number of ionizing photons:", MISC_sum_photons
       end if
    end subroutine MISC_photoionization
 
-   subroutine update_excited(amr_grid)
+   subroutine update_excited(pc, rng, amr_grid)
       use m_efield_amr
-
+      use m_phys_domain
+      use m_random
+      use m_particle_core
+      type(PC_t), intent(inout) :: pc
+      type(RNG_t), intent(inout) :: rng
       type(amr_grid_t), intent(inout) :: amr_grid
       real(dp), allocatable           :: loss(:,:,:)
       logical, allocatable            :: child_region(:, :, :)
@@ -150,54 +158,61 @@ contains
 
                xyz            = E_ix_to_xyz(amr_grid, (/i, j, k/))
                e_str          = norm2(E_get_field(xyz))
-               n_photons      = kiss_Poisson(findPhotoEff(e_str) * loss(i,j,k) * MISC_quench_fac)
+               n_photons      = rng%poisson(findPhotoEff(e_str) * loss(i,j,k) * MISC_quench_fac)
                MISC_sum_photons = MISC_sum_photons + n_photons ! Global variable :(
 
                do n = 1, n_photons
-                  energy_frac = kiss_rand()
-                  flylen      = -log(1.0_dp - kiss_rand()) / Pho_kf(energy_frac)
-                  psi         = 2 * acos(-1.0_dp) * kiss_rand()
-                  chi         = acos(1.0_dp - 2 * kiss_rand())
+                  energy_frac = rng%uni_01()
+                  flylen      = -log(1.0_dp - rng%uni_01()) / Pho_kf(energy_frac)
+                  psi         = 2 * acos(-1.0_dp) * rng%uni_01()
+                  chi         = acos(1.0_dp - 2 * rng%uni_01())
 
                   x_end(1)    = xyz(1) + flylen * sin(chi) * cos(psi)
                   x_end(2)    = xyz(2) + flylen * sin(chi) * sin(psi)
                   x_end(3)    = xyz(3) + flylen * cos(chi)
 
                    ! Create electron-ion pair with excess enery of photon
-                  if (.not. isOutOfGas(x_end)) call createIonPair(x_end, energy_frac * 0.554D0, 1)
+                  if (.not. PD_outside_domain(x_end)) call createIonPair(x_end, energy_frac * 0.554D0, 1)
                end do
             end do
          end do
       end do
    end subroutine update_excited
 
-   subroutine MISC_detachment(dt, myrank, root)
-      use m_efield_amr
-      real(dp), intent(in) :: dt
-      integer, intent(in)  :: myrank, root
+   subroutine MISC_detachment(pc, rng, dt, myrank, root)
+     use m_efield_amr
+     use m_particle_core
+     use m_random
+     real(dp), intent(in) :: dt
+     integer, intent(in)  :: myrank, root
+     type(PC_t), intent(inout) :: pc
+     type(RNG_t), intent(inout) :: rng
+     ! Set global vars
+     MISC_dt = dt
+     MISC_sum_detach = 0
 
-      ! Set global vars
-      MISC_dt = dt
-      MISC_sum_detach = 0
+     call E_collect_mpi((/E_i_O2m/), myrank, root)
 
-      call E_collect_mpi((/E_i_O2m/), myrank, root)
-
-      if (myrank == root) then
-         call E_loop_over_grids(update_detachment)
-         print *, "Number of detachments", MISC_sum_detach
-      end if
+     if (myrank == root) then
+        call E_loop_over_grids(pc, rng, update_detachment)
+        print *, "Number of detachments", MISC_sum_detach
+     end if
    end subroutine MISC_detachment
 
-   subroutine update_detachment(amr_grid)
+   subroutine update_detachment(pc, rng, amr_grid)
       use m_efield_amr
-      use m_particle
-
+      use m_particle_core
+      use m_random
+      use m_phys_domain
+      type(PC_t), intent(inout) :: pc
+      type(RNG_t), intent(inout) :: rng
       type(amr_grid_t), intent(inout) :: amr_grid
       real(dp), allocatable           :: loss(:,:,:)
       logical, allocatable            :: child_region(:, :, :)
       integer                         :: i, j, k, Nx, Ny, Nz
       integer                         :: n, nc, i_min(3), i_max(3), n_detach
       real(dp)                        :: xyz(3), e_str
+      real(dp) :: v(3), a(3), w, t_left
 
       Nx = amr_grid%Nr(1)
       Ny = amr_grid%Nr(2)
@@ -238,12 +253,17 @@ contains
                if (loss(i,j,k) <= epsilon(1.0_dp)) cycle
 
                xyz             = E_ix_to_xyz(amr_grid, (/i, j, k/))
-               n_detach        = kiss_Poisson(loss(i,j,k))
+               n_detach        = rng%poisson(loss(i,j,k))
                MISC_sum_detach = MISC_sum_detach + n_detach ! Global variable :(
 
                do n = 1, n_detach
                   ! Give a small energy up to 1 eV
-                  if (.not. isOutOfGas(xyz)) call PM_createElectron(xyz, kiss_rand(), 1)
+                  v = 0
+                  a = 0
+                  w = 1
+                  t_left = 0
+                  if (.not. PD_outside_domain(xyz)) &
+                       call pc%create_part(xyz, v, a, w, t_left)
                end do
             end do
          end do
@@ -257,10 +277,10 @@ contains
       real(dp), intent(in) :: O2min_dens, e_str
       real(dp) :: T_eff
 
-      T_eff = GAS_temperature + N2_mass / (3.0d0 * BoltzmannConstant) * (e_str * 2.0d-4)**2
+      T_eff = GAS_get_temperature() + UC_N2_mass / (3.0d0 * UC_boltzmann_const) * (e_str * 2.0d-4)**2
       MISC_get_O2m_loss = 1.9d-12 * sqrt(T_eff/3.0d2) * exp(-4.990e3/T_eff) * MISC_N2_bgdens * 1.0d-6 + &
            2.7d-10 * sqrt(T_eff/3.0d2) * exp(-5.590e3/T_eff) * MISC_O2_bgdens * 1.0d-6
       MISC_get_O2m_loss = MISC_get_O2m_loss * O2min_dens * MISC_dt
    end function MISC_get_O2m_loss
 
-end module module_photoionization
+ end module m_misc_process
