@@ -78,6 +78,7 @@ module m_particle_core
      procedure, non_overridable :: set_coll_rates
      procedure, non_overridable :: get_mean_energy
      procedure, non_overridable :: get_coll_rates
+     procedure, non_overridable :: check_space
 
      procedure, non_overridable :: merge_and_split
      procedure, non_overridable :: histogram
@@ -188,119 +189,6 @@ contains
     allocate(self%particles(new_size))
     self%particles(1:self%n_part) = parts_copy
   end subroutine resize_part_list
-
-  ! Share particles between PC_t objects
-  subroutine PC_share_particles(pcs)
-    type(PC_t), intent(inout) :: pcs(:)
-
-    integer :: i, i_temp(1), n_pc
-    integer :: n_avg, i_min, i_max, n_min, n_max, n_send
-
-    n_pc = size(pcs)
-    n_avg = ceiling(sum(pcs(:)%n_part) / real(n_pc, dp))
-
-    do
-       i_temp = maxloc(pcs(:)%n_part)
-       i_max  = i_temp(1)
-       n_max  = pcs(i_max)%n_part
-       i_temp = minloc(pcs(:)%n_part)
-       i_min  = i_temp(1)
-       n_min  = pcs(i_min)%n_part
-
-       ! Difference it at most size(ixs) - 1, if all lists get one more particle
-       ! than the last list
-       if (n_max - n_min < n_pc) exit
-
-       ! Send particles from i_max to i_min
-       n_send = min(n_max - n_avg, n_avg - n_min)
-       ! print *, n_avg, n_send, i_min, n_min, i_max, n_max
-       pcs(i_min)%particles(n_min+1:n_min+n_send) = &
-            pcs(i_max)%particles(n_max-n_send+1:n_max)
-
-       ! Always at the end of a list, so do not need to clean up later
-       pcs(i_min)%n_part = pcs(i_min)%n_part + n_send
-       pcs(i_max)%n_part = pcs(i_max)%n_part - n_send
-    end do
-  end subroutine PC_share_particles
-
-  subroutine PC_reorder_by_bins(pcs, bin_func, n_bins, bin_func_args)
-    use m_mrgrnk
-    type(PC_t), intent(inout) :: pcs(:)
-    interface
-       integer function bin_func(my_part, r_args)
-         import
-         type(PC_part_t), intent(in) :: my_part
-         real(dp), intent(in) :: r_args(:)
-       end function bin_func
-    end interface
-    integer, intent(in) :: n_bins
-    real(dp), intent(in) :: bin_func_args(:)
-    integer, allocatable :: bin_counts(:,:)
-    integer, allocatable :: bin_counts_sum(:)
-    integer, allocatable :: bin_owner(:)
-    integer :: prev_num_part(size(pcs))
-    integer :: n, n_pc, n_avg, n_add, tmp_sum
-    integer :: ll, io, ib, ip, new_loc
-
-    type tmp_t
-       integer, allocatable :: ib(:)
-    end type tmp_t
-    type(tmp_t), allocatable :: pcs_bins(:)
-
-    n_pc = size(pcs)
-    n_avg = ceiling(sum(pcs(:)%n_part) / real(n_pc, dp))
-
-    allocate(bin_counts(n_bins, n_pc))
-    allocate(bin_counts_sum(n_bins))
-    allocate(bin_owner(n_bins))
-    allocate(pcs_bins(n_pc))
-    bin_counts(:, :) = 0
-
-    ! Get the counts in the bins for each pcs(ip)
-    do ip = 1, n_pc
-       allocate(pcs_bins(ip)%ib(pcs(ip)%n_part))
-       do ll = 1, pcs(ip)%n_part
-          ib = bin_func(pcs(ip)%particles(ll), bin_func_args)
-          pcs_bins(ip)%ib(ll) = ib
-          bin_counts(ib, ip) = bin_counts(ib, ip) + 1
-       end do
-    end do
-
-    bin_counts_sum = sum(bin_counts, dim=2)
-    tmp_sum        = 0
-    ip             = 1
-
-    ! Set the owners of the bins
-    do ib = 1, n_bins
-       tmp_sum = tmp_sum + bin_counts_sum(ib)
-       bin_owner(ib) = ip
-       if (tmp_sum >= n_avg) then
-          ip = ip + 1
-          tmp_sum = 0
-       end if
-    end do
-
-    prev_num_part(:) = pcs(:)%n_part
-
-    do ip = 1, n_pc
-       do ll = 1, prev_num_part(ip)
-          ib = pcs_bins(ip)%ib(ll)
-          io = bin_owner(ib)
-          if (io /= ip) then
-             ! Insert at owner
-             new_loc = pcs(io)%n_part + 1
-             pcs(io)%particles(new_loc) = pcs(ip)%particles(ll)
-             pcs(io)%n_part = new_loc
-             call LL_add(pcs(ip)%clean_list, ll)
-          end if
-       end do
-    end do
-
-    do ip = 1, n_pc
-       call clean_up(pcs(ip))
-       print *, ip, pcs(ip)%n_part
-    end do
-  end subroutine PC_reorder_by_bins
 
   subroutine advance(self, dt)
     class(PC_t), intent(inout) :: self
@@ -726,6 +614,15 @@ contains
     real(dp), intent(in) :: en, mass
     PC_en_to_vel = sqrt(2 * en / mass)
   end function PC_en_to_vel
+
+  subroutine check_space(self, n_req)
+    class(PC_t), intent(inout) :: self
+    integer, intent(in) :: n_req
+    if (n_req > size(self%particles)) then
+       print *, "Particle list too small!"
+       stop
+    end if
+  end subroutine check_space
 
   !> Create a lookup table with cross sections for a number of energies
   subroutine set_coll_rates(self, cross_secs, mass, max_eV, table_size)
