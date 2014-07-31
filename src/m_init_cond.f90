@@ -26,11 +26,12 @@ module m_init_cond
 contains
 
    !> Sets up the initial particles for a simulation
-  subroutine IC_set_init_cond(rng)
+  subroutine IC_set_init_cond(pc, rng)
     use m_efield_amr
     use m_random
     use m_config
     use m_phys_domain
+    type(PC_t), intent(inout) :: pc
     type(RNG_t), intent(inout) :: rng
     character(LEN=40)      :: initCond
     logical                :: success

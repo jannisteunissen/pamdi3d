@@ -126,6 +126,7 @@ contains
       integer                         :: i, j, k, Nx, Ny, Nz
       integer                         :: n, nc, i_min(3), i_max(3), n_photons
       real(dp)                        :: xyz(3), x_end(3), flylen, chi, psi, e_str, energy_frac
+      real(dp) :: v(3), a(3), w, t_left
 
       Nx = amr_grid%Nr(1)
       Ny = amr_grid%Nr(2)
@@ -171,8 +172,14 @@ contains
                   x_end(2)    = xyz(2) + flylen * sin(chi) * sin(psi)
                   x_end(3)    = xyz(3) + flylen * cos(chi)
 
+                  v      = 0
+                  a      = 0
+                  w      = 1
+                  t_left = 0
+
                    ! Create electron-ion pair with excess enery of photon
-                  if (.not. PD_outside_domain(x_end)) call createIonPair(x_end, energy_frac * 0.554D0, 1)
+                  if (.not. PD_outside_domain(x_end)) &
+                       call pc%create_part(x_end, v, a, w, t_left)
                end do
             end do
          end do

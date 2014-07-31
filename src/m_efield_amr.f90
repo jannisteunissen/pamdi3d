@@ -38,7 +38,6 @@ module m_efield_amr
    integer  :: E_bc_type
    integer  :: E_min_grid_separation
    integer  :: E_grid_buffer_width
-   logical  :: E_useElectrode
 
    integer  :: E_ref_max_lvl
    integer  :: E_ref_lvl_electrode
@@ -102,7 +101,6 @@ contains
       call CFG_get("sim_efield_times", E_efield_times)
 
       E_bc_type      = CFG_get_int("elec_boundaryType")
-      E_useElectrode = CFG_get_logic("sim_useElectrode")
       varSize        = CFG_get_size("ref_deltaValues")
 
       if (varSize /= CFG_get_size("ref_maxEfieldAtDelta")) then
@@ -335,6 +333,7 @@ contains
    subroutine E_compute_field(myrank, root, time)
       use m_electrode
       use m_units_constants
+      use m_phys_domain
       real(dp), intent(in) :: time
       integer, intent(in)  :: myrank, root
       integer              :: ix, nElecPoints
@@ -348,7 +347,7 @@ contains
          call set_source_term_recursive(root_grid)
 
          ! Add the electrode charges based on the old potential
-         if (E_useElectrode) then
+         if (PD_use_elec) then
             voltage = EL_getVoltage(time)
             nElecPoints = EL_getNPoints()
 
@@ -364,7 +363,7 @@ contains
          call compute_potential_recursive(root_grid, time)
          call compute_field_recursive(root_grid)
 
-         if (E_useElectrode) call check_elec_voltage(time, E_prev_max_diff)
+         if (PD_use_elec) call check_elec_voltage(time, E_prev_max_diff)
       end if
 
       call E_share_vars((/E_i_Ex, E_i_Ey, E_i_Ez/), root)
@@ -549,6 +548,8 @@ contains
 
    logical function need_to_refine(amr_grid, ix)
       use m_electrode
+      use m_phys_domain
+      use m_lookup_table
       type(amr_grid_t), intent(in) :: amr_grid
       integer, intent(in)          :: ix(3)
       real(dp)                     :: xyz(3)
@@ -562,7 +563,7 @@ contains
          need_to_refine = .false.
       else
          ! Find maximum Efield for the delta at this level
-         call linearInterpolateList(E_dr_vs_efield(1, :), E_dr_vs_efield(2, :),  maxval(amr_grid%dr), max_ef)
+         call LT_lin_interp_list(E_dr_vs_efield(1, :), E_dr_vs_efield(2, :),  maxval(amr_grid%dr), max_ef)
          if (norm2(E_get_field(xyz)) > max_ef) then
             need_to_refine = .true.
          else
@@ -570,7 +571,7 @@ contains
          end if
       end if
 
-    if (E_useElectrode) then
+    if (PD_use_elec) then
        if (EL_around_electrode_tip(xyz)) then
           ! Refine around electrode tip
           need_to_refine = need_to_refine .or. amr_grid%lvl < E_ref_lvl_electrode
@@ -788,7 +789,8 @@ contains
 
    subroutine set_bc_dirichlet(amr_grid, time)
       use m_electrode
-
+      use m_phys_domain
+      use m_lookup_table
       type(amr_grid_t), intent(inout) :: amr_grid
       real(dp), intent(in)            :: time
 
@@ -801,10 +803,10 @@ contains
       Ny = amr_grid%Nr(2)
       Nz = amr_grid%Nr(3)
 
-      if (E_useElectrode) then
+      if (PD_use_elec) then
          voltage = EL_getVoltage(time)
       else
-         call linearinterpolateList(E_efield_times, E_efield_values, time, efield)
+         call LT_lin_interp_list(E_efield_times, E_efield_values, time, efield)
          voltage = -efield * (amr_grid%r_max(3) - amr_grid%r_min(3))
       end if
 
@@ -831,7 +833,7 @@ contains
 
       else if (E_bc_type == 2) then
          ! Potential zero at the sides, for use with an electrode
-         if (.not. E_useElectrode) then
+         if (.not. PD_use_elec) then
             print *, "This boundary condition can only be used with an electrode:", E_bc_type
             stop
          end if

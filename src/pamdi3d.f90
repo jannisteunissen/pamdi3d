@@ -21,12 +21,14 @@ program pamdi3d
   use m_init_cond
   use m_particle
   use m_particle_core
+  use m_particle_par
   use m_efield_amr
   use m_electrode
   use m_config
   use m_misc_process
   use m_gas
   use m_random
+  use m_phys_domain
   use mpi
 
   implicit none
@@ -61,6 +63,10 @@ program pamdi3d
   real(dp) :: n_elec_sum
   real(dp) :: dt_min, dt_max, dt, dt_next
   real(dp) :: meanWeight
+
+  ! Particle binning
+  real(dp) :: bin_args(2)
+  integer :: n_bins
 
   type(PC_t) :: pc
   type(RNG_t) :: rng
@@ -114,7 +120,9 @@ program pamdi3d
   call pc%initialize(UC_elec_mass, cross_secs, CFG_get_int("part_lkp_tbl_size"), &
        CFG_get_real("part_max_eV"), CFG_get_int("part_max_num"))
 
-  if (use_photoion) then
+  use_photoion = CFG_get_logic("sim_use_photoionization")
+  use_detach = CFG_get_logic("sim_use_detachment")
+  if (use_photoion .or. use_detach) then
      print *, " ~~~ initializing photoionization module"
      call MISC_initialize()
   end if
@@ -126,7 +134,7 @@ program pamdi3d
   end if
 
   if (myrank == root) print *, "Sharing initial particles"
-  call PC_share_particles_mpi(myrank, ntasks)
+  call PP_share_mpi(pc, myrank, ntasks)
 
   if (myrank == root) print *, "Computing initial fld"
   call PM_particles_to_density(pc)
@@ -171,6 +179,7 @@ program pamdi3d
   n_grid_adapt        = 0
   step_cntr           = 0
   steps_left_fld      = 0
+  n_part_sum_prev     = PM_get_num_part_mpi(pc)
 
   sim_time            = 0.0D0
   prev_fld_time       = 0.0D0
@@ -188,6 +197,10 @@ program pamdi3d
   max_interp_err      = CFG_get_real("sim_max_interp_err")
   min_incr_rescale    = CFG_get_real("sim_min_incr_rescale")
   use_detach          = CFG_get_logic("sim_use_O2Min_bg")
+
+  bin_args(1) = 0
+  bin_args(2) = 1/PD_dr(1)
+  n_bins = PD_r_max(1) / PD_dr(1)
 
   dt_next             = dt_min
   dt_fld              = dt_min
@@ -216,7 +229,7 @@ program pamdi3d
      call pc%advance(dt)
 
      if (steps_left_fld <= 0) then
-        n_part_sum    = PM_get_num_part_mpi(pc)
+        n_part_sum = PM_get_num_part_mpi(pc)
 
         if (use_photoion) call MISC_photoionization(pc, rng, sim_time - prev_fld_time, myrank, root)
         if (use_detach) call MISC_detachment(pc, rng, sim_time - prev_fld_time, myrank, root)
@@ -228,7 +241,7 @@ program pamdi3d
         call pc%set_accel(E_get_accel_part)
 
         ! Redistribute the particles
-        call PM_share_particles_mpi(myrank, ntasks)
+        call PP_share_mpi(pc, myrank, ntasks)
 
         dt_next = PM_get_max_dt(pc, myrank, root)
 
@@ -284,13 +297,13 @@ program pamdi3d
 
            ! TODO: The above call modifies the electron density slightly,
            ! probably not very important but check it later.
-           call PM_divide_particles_mpi(myrank, ntasks)
+           call PP_reorder_by_bins_mpi(pc, PM_bin_func, n_bins, bin_args, myrank, ntasks)
 
            if (myrank == root) then
               print *, step_cntr, "Rescaling particles, meanWeight:", meanWeight, "nParticles", n_part_sum
            end if
 
-           call PM_store_fld_samples(n_fld_samples)
+           call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.true.)
            call PM_mergeAndSplit(myrank)
 
            n_part_sum_prev  = PM_get_num_part_mpi(pc)
@@ -298,7 +311,7 @@ program pamdi3d
 
            call PM_particles_to_density(pc)
            call E_compute_field(myrank, root, sim_time)
-           call PM_compare_fld_samples(fld_err, n_fld_samples)
+           call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.false.)
 
            if (myrank == root) then
               print *, "Fld error due to rescaling:", fld_err
@@ -307,7 +320,7 @@ program pamdi3d
            call pc%set_accel(E_get_accel_part)
 
            ! Redistribute the particles
-           call PM_share_particles_mpi(myrank, ntasks)
+           call PP_share_mpi(pc, myrank, ntasks)
         end if
 
         if (myrank == root) then

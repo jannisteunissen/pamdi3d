@@ -1,21 +1,14 @@
 module m_phys_domain
   
   implicit none
-  private
+  public
   
-  integer, parameter :: dp = kind(0.0d0)
+  integer, parameter, private :: dp = kind(0.0d0)
 
   real(dp) :: PD_r_max(3)
   real(dp) :: PD_dr(3)
   integer  :: PD_size(3)
   logical :: PD_use_elec
-
-  ! Public methods
-  public :: PD_set
-  public :: PD_r_max
-  public :: PD_dr
-  public :: PD_size
-  public :: PD_outside_domain
 
 contains
   
@@ -40,7 +33,8 @@ contains
     ! Check whether any component of the position is outside of the domain
     PD_outside_domain = any(pos <= 0 .or. pos >= PD_r_max)
 
-    ! Now if any component is outside the domain or inside the electrode, PD_outside_domain = .TRUE.
+    ! Now if any component is outside the domain or inside the electrode,
+    ! PD_outside_domain = .TRUE.
     if (PD_use_elec) then
        if (EL_inside_elec(pos)) then
           PD_outside_domain = .true.
