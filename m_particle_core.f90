@@ -95,6 +95,12 @@ module m_particle_core
        real(dp), intent(out)       :: my_vec(3)
      end subroutine part_to_r3_p
 
+     function part_to_r3_f(my_part) result(my_vec)
+       import
+       type(PC_part_t), intent(in) :: my_part
+       real(dp)                    :: my_vec(3)
+     end function part_to_r3_f
+     
      real(dp) function part_to_r_f(my_part)
        import
        type(PC_part_t), intent(in) :: my_part
@@ -415,13 +421,11 @@ contains
 
   subroutine set_accel(self, accel_func)
     class(PC_t), intent(inout) :: self
-    procedure(part_to_r3_p) :: accel_func
-    integer                   :: ll
-    real(dp)                  :: new_accel(3)
+    procedure(part_to_r3_f)    :: accel_func
+    integer                    :: ll
 
     do ll = 1, self%n_part
-       call accel_func(self%particles(ll), new_accel)
-       self%particles(ll)%a = new_accel
+       self%particles(ll)%a = accel_func(self%particles(ll))
     end do
   end subroutine set_accel
 
