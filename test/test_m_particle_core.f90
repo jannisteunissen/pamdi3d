@@ -1,5 +1,6 @@
 program test_m_particle_core
    use m_particle_core
+   use m_particle_par
    use m_cross_sec
    use m_units_constants
 
@@ -64,8 +65,8 @@ program test_m_particle_core
       call pmodels(1)%create_part(pos, vel, accel, weight, 0.0_dp)
    end do
 
-   call PC_share_particles(pmodels)
-   ! call PC_reorder_by_bins(pmodels, bin_func, n_bins, bin_args)
+   call PP_share(pmodels)
+   call PP_reorder_by_bins(pmodels, bin_func, n_bins, bin_args)
 
    do step = 1, max_num_steps
       print *, ""
@@ -143,8 +144,7 @@ contains
      real(dp), intent(in) :: bin_args(:)
      real(dp) :: tmp
      call random_number(tmp)
-     bin_func = 1 + tmp * n_bins
-     ! print *, bin_func
+     bin_func = 1 + int(tmp * n_bins)
    end function bin_func
 
  end program test_m_particle_core

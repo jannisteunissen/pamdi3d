@@ -30,11 +30,11 @@ module m_particle_core
 
   !> The particle type
   type, public :: PC_part_t
-     real(dp) :: x(3)
-     real(dp) :: v(3)
-     real(dp) :: a(3)
-     real(dp) :: w
-     real(dp) :: t_left   ! The time until the next timestep
+     real(dp) :: x(3)   = 0
+     real(dp) :: v(3)   = 0
+     real(dp) :: a(3)   = 0
+     real(dp) :: w      = 0
+     real(dp) :: t_left = 0
   end type PC_part_t
 
   type, public :: PC_t
@@ -117,8 +117,6 @@ module m_particle_core
   public :: PC_merge_part_rxv
   public :: PC_split_part
   public :: PC_v_to_en
-  public :: PC_share_particles
-  public :: PC_reorder_by_bins
 
 contains
 
