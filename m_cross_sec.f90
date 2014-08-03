@@ -81,7 +81,7 @@ contains
 
     my_unit      = 333
     nL           = 0 ! Set the number of lines to 0
-    cIx = 0
+    cIx          = 0
     len_gas_name = len(trim(gas_name))
 
     ! Set the line format to read, only depends on line_len currently
@@ -138,7 +138,7 @@ contains
           cycle
        case DEFAULT
           print *, "CS_read_file warning: ignoring unknown process type for ", &
-               trim(gas_name), " in ", filename, " at line ", nL
+               trim(gas_name), " in ", trim(filename), " at line ", nL
           cycle
        end select
 
@@ -180,7 +180,8 @@ contains
           read(my_unit, FMT = lineFMT, ERR = 999, end = 555) line; nL = nL+1
           line = adjustl(line)
           if ( line(1:9) == "ZDPLASKIN" ) then
-             cs_buf(cIx)%description = trim(gas_name) // " [" // trim(adjustl(line(11:))) // "]"
+             cs_buf(cIx)%description = trim(gas_name) // " [" // &
+                  trim(adjustl(line(11:))) // "]"
           else if ( line(1:7) == "COMMENT") then
              cs_buf(cIx)%comment = line
           else if ( line(1:7) == "SCALING") then
@@ -203,14 +204,15 @@ contains
              n_rows = n_rows + 1
              read(line, FMT = *, ERR = 999, end = 555) tempArray(:, n_rows)
           else
-             print *, "CS_read_file error: too many rows in ", filename, " at line ", nL
+             print *, "CS_read_file error: too many rows in ", trim(filename), &
+             " at line ", nL
              stop
           end if
        end do
 
        if (n_rows < 2) then
           print *, "CS_read_file error: need at least two values in ", &
-               filename, " at line number ", nL
+               trim(filename), " at line number ", nL
           stop
        end if
 
@@ -255,7 +257,8 @@ contains
 555 continue ! Routine ends here if the end of "filename" is reached erroneously
     close(my_unit, ERR = 999, IOSTAT = io_state)
     print *, "CS_read_file error, reached end of file while searching. ", &
-         "io_state = ", io_state, " while reading from [", filename, "] at line ", nL
+         "io_state = ", io_state, " while reading from [", trim(filename), &
+         "] at line ", nL
     stop
     return
 
@@ -281,7 +284,7 @@ contains
 
 999 continue ! If there was an error, the routine will end here
     print *, "CS_read_file error at line ", nL, " io_state = ", io_state, &
-         " while searching [", gas_name, "] in [", filename, "]"
+         " while searching [", trim(gas_name), "] in [", trim(filename), "]"
     stop
 
   end subroutine CS_add_from_file
@@ -293,7 +296,7 @@ contains
     integer                      :: n, io_state, my_unit
     my_unit = 333
 
-    open(my_unit, FILE = filename, ACTION = "WRITE", &
+    open(my_unit, FILE = trim(filename), ACTION = "WRITE", &
          ERR = 999, IOSTAT = io_state)
 
     write(my_unit, ERR = 999, FMT = "(A)") "# List of collision processes"
@@ -324,7 +327,7 @@ contains
 
 999 continue ! If there was an error, the routine will end here
     print *, "CS_write_summary error, io_state = ", io_state, &
-         " while writing to ", filename
+         " while writing to ", trim(filename)
     stop
 
   end subroutine CS_write_summary
