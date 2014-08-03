@@ -81,42 +81,43 @@ module m_efield_amr
    public :: E_share_vars
    public :: E_set_vars
    public :: E_adjust_electrode
-   public :: E_readjust_electrode_new_grid
+   public :: E_readjust_elec_new_grid
 
 contains
 
-   subroutine E_initialize()
+   subroutine E_initialize(cfg)
       use m_config
       use m_phys_domain
-      integer             :: varSize
+      type(CFG_t), intent(in) :: cfg
+      integer             :: dyn_size
 
-      call CFG_get("ref_min_grid_size", E_min_grid_size)
-      call CFG_get("ref_min_grid_separation", E_min_grid_separation)
-      E_ref_lvl_electrode = CFG_get_int("ref_min_lvl_electrode")
+      E_min_grid_size = CFG_get_int(cfg, "ref_min_grid_size")
+      E_min_grid_separation = CFG_get_int(cfg, "ref_min_grid_separation")
+      E_ref_lvl_electrode = CFG_get_int(cfg, "ref_min_lvl_electrode")
 
-      varSize = CFG_get_size("sim_efield_times")
-      allocate(E_efield_times(varSize))
-      allocate(E_efield_values(varSize))
-      call CFG_get("sim_efield_values", E_efield_values)
-      call CFG_get("sim_efield_times", E_efield_times)
+      dyn_size = CFG_get_size(cfg, "sim_efield_times")
+      allocate(E_efield_times(dyn_size))
+      allocate(E_efield_values(dyn_size))
+      call CFG_get_array(cfg, "sim_efield_values", E_efield_values)
+      call CFG_get_array(cfg, "sim_efield_times", E_efield_times)
 
-      E_bc_type      = CFG_get_int("elec_boundaryType")
-      varSize        = CFG_get_size("ref_deltaValues")
+      E_bc_type      = CFG_get_int(cfg, "elec_bc_type")
+      dyn_size        = CFG_get_size(cfg, "ref_delta_values")
 
-      if (varSize /= CFG_get_size("ref_maxEfieldAtDelta")) then
-         print *, "Make sure ref_EfieldValues and ref_deltaValues have the same size"
+      if (dyn_size /= CFG_get_size(cfg, "ref_max_efield_at_delta")) then
+         print *, "ref_efield_values and ref_delta_values have unequal size"
          stop
       end if
 
-      allocate( E_dr_vs_efield(2, varSize) )
-      call CFG_get("ref_deltaValues", E_dr_vs_efield(1, :))
-      call CFG_get("ref_maxEfieldAtDelta", E_dr_vs_efield(2, :))
+      allocate( E_dr_vs_efield(2, dyn_size) )
+      call CFG_get_array(cfg, "ref_delta_values", E_dr_vs_efield(1, :))
+      call CFG_get_array(cfg, "ref_max_efield_at_delta", E_dr_vs_efield(2, :))
 
-      call CFG_get("ref_MinElecDens", E_ref_min_elec_dens)
-      call CFG_get("ref_maxLevels", E_ref_max_lvl)
-      call CFG_get("ref_buffer_width", E_grid_buffer_width)
-      call CFG_get("grid_plasma_min_rel_pos", E_ref_min_xyz)
-      call CFG_get("grid_plasma_max_rel_pos", E_ref_max_xyz)
+      E_ref_min_elec_dens = CFG_get_real(cfg, "ref_min_elec_dens")
+      E_ref_max_lvl = CFG_get_int(cfg, "ref_max_levels")
+      E_grid_buffer_width = CFG_get_int(cfg, "ref_buffer_width")
+      call CFG_get_array(cfg, "grid_plasma_min_rel_pos", E_ref_min_xyz)
+      call CFG_get_array(cfg, "grid_plasma_max_rel_pos", E_ref_max_xyz)
       E_ref_min_xyz = E_ref_min_xyz * PD_r_max
       E_ref_max_xyz = E_ref_max_xyz * PD_r_max
 
@@ -258,7 +259,7 @@ contains
       end do
    end subroutine sync_grid_structure_recursive
 
-   subroutine E_readjust_electrode_new_grid(myrank, root, time, cntr)
+   subroutine E_readjust_elec_new_grid(myrank, root, time, cntr)
       use m_electrode
       use m_units_constants
       use mpi
@@ -305,7 +306,7 @@ contains
          print *, "Readjusting electrode done", max_diff, cntr
       end if
       call MPI_BCAST(cntr, 1, MPI_INTEGER, root, MPI_COMM_WORLD, ierror)
-   end subroutine E_readjust_electrode_new_grid
+   end subroutine E_readjust_elec_new_grid
 
    subroutine check_elec_voltage(time, max_diff)
       use m_electrode

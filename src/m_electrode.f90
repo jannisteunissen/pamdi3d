@@ -42,41 +42,40 @@ contains
   !> Generates a list of points that lie on the electrode surface, where we want to have the electrode potential.
   !!
   !! Currently this list of point remains constant during the simulation.
-  subroutine EL_initialize(rng, myrank, root)
+  subroutine EL_initialize(cfg, rng, r_max, myrank, root)
     use m_config
     use m_random
-    use m_phys_domain
+    type(CFG_t), intent(in) :: cfg
     type(RNG_t), intent(inout) :: rng
     integer, intent(in) :: myrank, root
+    real(dp), intent(in) :: r_max(3)
     real(dp) :: H_cone_eff
     integer :: n_time_points
 
     ! Set up a basic electrode, with conical part and cylindrical part
     ! This should be moved to a subroutine, so that we can select different electrodes
-    EL_voltage     = CFG_get_real("electrode_voltage")
-    EL_Hcone     = CFG_get_real("electrode_Hcone")
-    !       EL_Hcyl      = CFG_get_real("electrode_Hcyl")
+    EL_voltage     = CFG_get_real(cfg, "electrode_voltage")
+    EL_Hcone     = CFG_get_real(cfg, "electrode_hcone")
+    EL_Rcyl      = CFG_get_real(cfg, "electrode_rcyl")
+    EL_RcTip     = CFG_get_real(cfg, "electrode_rc_tip")
+    EL_RcTrans   = CFG_get_real(cfg, "electrode_rc_trans")
+    EL_spacing   = CFG_get_real(cfg, "electrode_spacing")
 
-    EL_Rcyl      = CFG_get_real("electrode_Rcyl")
-    EL_RcTip     = CFG_get_real("electrode_RcTip")
-    EL_RcTrans   = CFG_get_real("electrode_RcTrans")
-    EL_spacing   = CFG_get_real("electrode_spacing")
-
-    call CFG_getVar("electrode_xyzRelPos", EL_xyzPos)
+    call CFG_get_array(cfg, "electrode_xyz_rel_pos", EL_xyzPos)
     EL_topAngle  = atan(EL_Rcyl / EL_Hcone)
     H_cone_eff = EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - 1.0D0)
-    EL_Hcyl      = EL_xyzPos(3) * PD_r_max(3) - H_cone_eff - EL_spacing
+    EL_Hcyl      = EL_xyzPos(3) * r_max(3) - H_cone_eff - EL_spacing
     EL_topZ      = EL_Hcyl + H_cone_eff
-    EL_xyzPos    = EL_xyzPos * PD_r_max - (/0.0d0, 0.0d0, EL_topZ/)
+    EL_xyzPos    = EL_xyzPos * r_max - (/0.0d0, 0.0d0, EL_topZ/)
 
     ! Determine the transitions between rounded and straight parts
     EL_TransCurveStartZ = EL_Hcyl - EL_RcTrans * tan(EL_topAngle/2.0D0)
     EL_TransCurveEndZ   = EL_TransCurveStartZ + EL_RcTrans * sin(EL_topAngle)
     EL_tipCurveBeginZ   = EL_Hcyl + EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - sin(EL_topAngle))
-    n_time_points = CFG_get_size("elec_times")
+    n_time_points = CFG_get_size(cfg, "elec_times")
     allocate(elec_time_voltage(n_time_points, 2))
-    call CFG_getVar("elec_times", elec_time_voltage(:, 1))
-    call CFG_getVar("elec_voltages", elec_time_voltage(:,2))
+    call CFG_get_array(cfg, "elec_times", elec_time_voltage(:, 1))
+    call CFG_get_array(cfg, "elec_voltages", elec_time_voltage(:,2))
 
     if (myrank == root) call generate_electrode_surface(rng)
 
@@ -249,9 +248,10 @@ contains
   end function EL_getNPoints
 
   real(dp) function EL_getVoltage(time)
+    use m_lookup_table
     real(dp), intent(in) :: time
 
-    call linearInterpolateList(elec_time_voltage(:,1), elec_time_voltage(:,2), time, EL_getVoltage)
+    call LT_lin_interp_list(elec_time_voltage(:,1), elec_time_voltage(:,2), time, EL_getVoltage)
   end function EL_getVoltage
 
   subroutine EL_getSurfacePoint(ix, xyz)

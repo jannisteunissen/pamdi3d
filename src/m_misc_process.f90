@@ -41,12 +41,13 @@ module m_misc_process
 
 contains
 
-   subroutine MISC_initialize()
+   subroutine MISC_initialize(cfg)
       use m_gas
       use m_units_constants
       use m_config
-
-      MISC_tau_excited = CFG_get_real("PI_meanLifeTimeExcited")
+      type(CFG_t), intent(in) :: cfg
+      real(dp) :: temp_vec(2)
+      MISC_tau_excited = CFG_get_real(cfg, "PI_meanLifeTimeExcited")
 
       MISC_frac_O2 = GAS_get_fraction("O2")
 
@@ -58,32 +59,35 @@ contains
       MISC_O2_bgdens = GAS_get_number_dens() * GAS_get_fraction("O2")
       MISC_N2_bgdens = GAS_get_number_dens() * GAS_get_fraction("N2")
 
-      MISC_min_inv_abs_len = CFG_get_real("PI_absorpInvLengths",1) * MISC_frac_O2 * GAS_get_pressure()
-      MISC_max_inv_abs_len = CFG_get_real("PI_absorpInvLengths",2) * MISC_frac_O2 * GAS_get_pressure()
+      call CFG_get_array(cfg, "PI_absorpInvLengths", temp_vec)
+      MISC_min_inv_abs_len = temp_vec(1) * MISC_frac_O2 * GAS_get_pressure()
+      MISC_max_inv_abs_len = temp_vec(2) * MISC_frac_O2 * GAS_get_pressure()
 
       print *, "Max absorbp. length for photoionization ", 1.0d3 / MISC_min_inv_abs_len, "mm"
       print *, "Min absorbp. length for photoionization ", 1.0d3 / MISC_max_inv_abs_len, "mm"
 
       MISC_quench_fac = (30.0D0 * UC_torr_to_bar) / (GAS_get_pressure() + (30.0D0 * UC_torr_to_bar))
-      MISC_table_size = CFG_get_size("PI_EfieldTable")
+      MISC_table_size = CFG_get_size(cfg, "PI_EfieldTable")
 
-      if (MISC_table_size /= CFG_get_size("PI_efficiencyTable")) then
+      if (MISC_table_size /= CFG_get_size(cfg, "PI_efficiencyTable")) then
          print *, "Make sure MISC_efficiencyTable and MISC_EfieldTable have the same size"
          stop
       end if
 
       allocate( MISC_photo_eff_table(2, MISC_table_size) )
 
-      call CFG_getVar("PI_EfieldTable", MISC_photo_eff_table(1,:) )
-      call CFG_getVar("PI_efficiencyTable", MISC_photo_eff_table(2,:) )
+      call CFG_get_array(cfg, "PI_EfieldTable", MISC_photo_eff_table(1,:) )
+      call CFG_get_array(cfg, "PI_efficiencyTable", MISC_photo_eff_table(2,:) )
 
    end subroutine MISC_initialize
 
    real(dp) function findPhotoEff(E_f)
+     use m_lookup_table
       ! Returns the photo-efficiency coefficient corresponding to an electric
       ! field of strength E_f
       real(dp), intent(IN) :: E_f
-      call linearInterpolateList(MISC_photo_eff_table(1,:), MISC_photo_eff_table(2,:), E_f, findPhotoEff)
+      call LT_lin_interp_list(MISC_photo_eff_table(1,:), &
+           MISC_photo_eff_table(2,:), E_f, findPhotoEff)
    end function findPhotoEff
 
    real(dp) function Pho_kf(energy_frac)

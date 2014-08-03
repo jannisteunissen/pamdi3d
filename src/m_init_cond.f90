@@ -26,18 +26,22 @@ module m_init_cond
 contains
 
    !> Sets up the initial particles for a simulation
-  subroutine IC_set_init_cond(pc, rng)
+  subroutine IC_set_init_cond(pc, cfg, rng)
     use m_efield_amr
     use m_random
     use m_config
     use m_phys_domain
+    use m_particle_core
+    use m_particle
     type(PC_t), intent(inout) :: pc
+    type(CFG_t), intent(in) :: cfg
     type(RNG_t), intent(inout) :: rng
     character(LEN=40)      :: initCond
     logical                :: success
     integer                :: ll, ix
-    integer                ::  initWeight, nBackgroundPairs
-    real(dp)               :: electronEnergy, radius, nIonPairs
+    integer                :: nBackgroundPairs
+    real(dp) :: init_weight
+    real(dp)               :: radius, nIonPairs
     real(dp)               :: temp
     real(dp)               :: backgroundDensity, bgO2MinDensity
     real(dp), dimension(3) :: pos, initSeedPos
@@ -47,11 +51,10 @@ contains
          maxFac, tempVec(3), lineDirection(3), lineBase(3)
 
 
-    nIonPairs = CFG_get_real("init_nIonPairs")
-    electronEnergy    = CFG_get_real("init_electronEnergy")
-    initWeight        = CFG_get_int("init_weightFactor")
-    backgroundDensity = CFG_get_real("init_backgroundDensity")
-    bgO2MinDensity    = CFG_get_real("init_O2MinBackgroundDens")
+    nIonPairs = CFG_get_real(cfg, "init_nIonPairs")
+    init_weight        = CFG_get_int(cfg, "init_weightFactor")
+    backgroundDensity = CFG_get_real(cfg, "init_backgroundDensity")
+    bgO2MinDensity    = CFG_get_real(cfg, "init_O2MinBackgroundDens")
 
     ! Set the background negative ions, for detachment
     call E_set_vars((/E_i_O2m, E_i_pion/), (/bgO2MinDensity, bgO2MinDensity/))
@@ -62,64 +65,64 @@ contains
     do ll = 1, nBackgroundPairs
        pos = (/rng%uni_01(), rng%uni_01(), rng%uni_01()/)
        pos = pos * PD_r_max
-       if (.not. PD_outside_domain(pos)) call createIonPair(pos, electronEnergy, 1)
+       if (.not. PD_outside_domain(pos)) call PM_create_ei_pair(pc, pos)
     end do
 
     print *, "Setting up the initial condition"
 
     ! Set the initial conditions
-    call CFG_getVar("init_condType", initCond)
+    initCond = CFG_get_string(cfg, "init_condType")
 
     select case (initCond)
     case ('seed')
        ! Electron/ion pairs start at fixed position
-       call CFG_getVar("init_relSeedPos", initSeedPos)
-       do ll = 1, int (nIonPairs / initWeight)
+       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
+       do ll = 1, int (nIonPairs / init_weight)
           pos = initSeedPos * PD_r_max
-          call createIonPair(pos, electronEnergy, initWeight)
+          call PM_create_ei_pair(pc, pos, w=init_weight)
        end do
 
     case ('double_seed')
        ! Electron/ion pairs start at fixed position
-       call CFG_getVar("init_relSeedPos", initSeedPos)
-       radius = CFG_get_real("init_seedPosRadius")
+       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
+       radius = CFG_get_real(cfg, "init_seedPosRadius")
 
-       do ll = 1, int(nIonPairs / (2 * initWeight))
+       do ll = 1, int(nIonPairs / (2 * init_weight))
           pos = initSeedPos * PD_r_max
           pos(1) = pos(1) - radius
-          call createIonPair(pos, electronEnergy, initWeight)
+          call PM_create_ei_pair(pc, pos, w=init_weight)
        end do
 
-       do ll = 1, int(nIonPairs / (2 * initWeight))
+       do ll = 1, int(nIonPairs / (2 * init_weight))
           pos = initSeedPos * PD_r_max
           pos(1) = pos(1) + radius
-          call createIonPair(pos, electronEnergy, initWeight)
+          call PM_create_ei_pair(pc, pos, w=init_weight)
        end do
 
     case ('Gaussian')
        ! Electron/ion pairs are distributed as a 3D Gaussian distribution
        ! with mean initSeedPos and sigma init_seedPosRadius
-       radius = CFG_get_real("init_seedPosRadius")
-       call CFG_getVar("init_relSeedPos", initSeedPos)
+       radius = CFG_get_real(cfg, "init_seedPosRadius")
+       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
        initSeedPos = initSeedPos * PD_r_max
 
-       do ll = 1, int (nIonPairs / initWeight)
+       do ll = 1, int (nIonPairs / init_weight)
           success = .false.
           do while (.not. success)
              pos(1:2) = rng%two_normals()
              pos(2:3) = rng%two_normals()
              pos = initSeedPos + pos * radius
              if (.not. PD_outside_domain(pos)) then
-                call createIonPair(pos, electronEnergy, initWeight)
+                call PM_create_ei_pair(pc, pos, w=init_weight)
                 success = .true.
              end if
           end do
        end do
 
     case ('laserLine')
-       radius = CFG_get_real("init_seedPosRadius")
-       call CFG_getVar("init_laserDirection", lineDirection)
-       call CFG_getVar("init_laserLineOffset", lineBase)
+       radius = CFG_get_real(cfg, "init_seedPosRadius")
+       call CFG_get_array(cfg, "init_laserDirection", lineDirection)
+       call CFG_get_array(cfg, "init_laserLineOffset", lineBase)
 
        ! Find first orthogonal vector
        if (abs(lineDirection(2)) < epsilon(1.0d0)) then
@@ -155,36 +158,36 @@ contains
        end do
 
        lineLen = norm2((maxFac - minFac) * lineDirection * PD_r_max)
-       temp = CFG_get_real("init_lineDens")
+       temp = CFG_get_real(cfg, "init_lineDens")
        nIonPairs = temp * radius**2 * lineLen
 
-       print *, "Laser nIonPairs", nIonPairs/initWeight, lineLen, minFac, maxFac
+       print *, "Laser nIonPairs", nIonPairs/init_weight, lineLen, minFac, maxFac
        print *, orthVec1, orthVec2
 
-       do ll = 1, int(nIonPairs/initWeight)
+       do ll = 1, int(nIonPairs/init_weight)
           pos = (rng%uni_01() * (maxFac-minFac) + minFac) * lineDirection + lineBase
           pos = pos * PD_r_max
           pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec1
           pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec2
           !                print *, ll, pos
-          if (.not. PD_outside_domain(pos)) call createIonPair(pos, electronEnergy, initWeight)
+          if (.not. PD_outside_domain(pos)) call PM_create_ei_pair(pc, pos, w=init_weight)
        end do
 
     case ('Gaussian1D')
        ! Electron/ion pairs are distributed as a 1D Gaussian distribution
        ! with mean initSeedPos and sigma init_seedPosRadius
-       radius = CFG_get_real("init_seedPosRadius")
-       call CFG_getVar("init_relSeedPos", initSeedPos)
+       radius = CFG_get_real(cfg, "init_seedPosRadius")
+       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
        initSeedPos = initSeedPos * PD_r_max
 
-       do ll = 1, int (nIonPairs / initWeight)
+       do ll = 1, int (nIonPairs / init_weight)
           success = .false.
           do while (.not. success)
              pos(2:3) = rng%two_normals()
              pos(1:2) = (/0.0D0, 0.0D0/)
              pos = initSeedPos + pos * radius
              if (.not. PD_outside_domain(pos)) then
-                call createIonPair(pos, electronEnergy, initWeight)
+                call PM_create_ei_pair(pc, pos, w=init_weight)
                 success = .true.
              end if
           end do
