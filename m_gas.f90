@@ -63,9 +63,12 @@ contains
        if (comp_name == trim(GAS_comp_names(ix))) exit
     end do
 
-    if (ix == GAS_num_gases + 1) print *, "GAS_get_fraction: " // comp_name // " not found"
-    GAS_get_fraction = GAS_comp_fracs(ix)
-
+    if (ix == GAS_num_gases + 1) then
+       print *, "GAS_get_fraction: " // comp_name // " not found"
+       stop
+    else
+       GAS_get_fraction = GAS_comp_fracs(ix)
+    end if
   end function GAS_get_fraction
 
   integer function GAS_get_num_gases()

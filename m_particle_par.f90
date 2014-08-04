@@ -7,22 +7,35 @@ module m_particle_par
   integer, parameter :: dp = kind(0.0d0)
 
   ! Public methods
-  public :: PP_get_num_part
+  public :: PP_get_num_real_part
+  public :: PP_get_num_sim_part
   public :: PP_share_mpi
   public :: PP_reorder_by_bins_mpi
 
 contains
 
-  integer function PP_get_num_part(pc)
+  integer function PP_get_num_sim_part(pc)
     use mpi
     use m_particle_core
     type(PC_t), intent(in) :: pc
     integer                :: ierr, n_part_sum
 
-    n_part_sum = pc%n_part
-    call MPI_ALLREDUCE(n_part_sum, PP_get_num_part, 1, MPI_integer, MPI_SUM, &
-         MPI_COMM_WORLD, ierr)
-  end function PP_get_num_part
+    n_part_sum = pc%get_num_sim_part()
+    call MPI_ALLREDUCE(n_part_sum, PP_get_num_sim_part, 1, MPI_integer, &
+         MPI_SUM, MPI_COMM_WORLD, ierr)
+  end function PP_get_num_sim_part
+
+  real(dp) function PP_get_num_real_part(pc)
+    use mpi
+    use m_particle_core
+    type(PC_t), intent(in) :: pc
+    integer                :: ierr
+    real(dp)               :: n_part_sum
+
+    n_part_sum = pc%get_num_real_part()
+    call MPI_ALLREDUCE(n_part_sum, PP_get_num_real_part, 1, &
+         MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
+  end function PP_get_num_real_part
 
   subroutine PP_share_mpi(pc, myrank, ntasks)
     use mpi
@@ -81,29 +94,18 @@ contains
   end subroutine PP_share_mpi
 
   ! Divide the particles over the tasks based on their bin index
-  subroutine PP_reorder_by_bins_mpi(pc, bin_func, n_bins, bin_func_args, &
-       myrank, ntasks)
+  subroutine PP_reorder_by_bins_mpi(pc, binner, myrank, ntasks)
     use mpi
     use m_lookup_table
     use m_mrgrnk
     use m_linked_list
     type(PC_t), intent(inout) :: pc
-    real(dp), intent(in) :: bin_func_args(:)
-    integer, intent(in) :: n_bins, myrank, ntasks
-
-    interface
-       integer function bin_func(my_part, r_args)
-         import
-         type(PC_part_t), intent(in) :: my_part
-         real(dp), intent(in) :: r_args(:)
-       end function bin_func
-    end interface
-
+    class(PC_bin_t), intent(in) :: binner
+    integer, intent(in) :: myrank, ntasks
     integer :: ll, ix, rank, ierr, n_behind, n_part_interval, n_send
     integer :: i_min, i_max
     integer :: tag, part_count
     integer :: n_sends, n_recvs, sender, recver, n_part_mean
-    integer :: mpi_status(MPI_STATUS_SIZE)
     integer :: n_part_task(0:ntasks-1)
     integer :: n_part_interval_task(0:ntasks-1, 0:ntasks-1)
     integer :: split_ix(-1:ntasks)
@@ -117,19 +119,19 @@ contains
          MPI_integer, MPI_COMM_WORLD, ierr)
 
     n_part_mean = (sum(n_part_task) + ntasks - 1) / ntasks
-    allocate(n_part_per_bin(n_bins))
+    allocate(n_part_per_bin(binner%n_bins))
     allocate(bin_ixs(pc%n_part))
     allocate(ix_list(pc%n_part))
     n_part_per_bin = 0
 
     ! Set the bin indexes for the particles
     do ll = 1, pc%n_part
-       ix                   = bin_func(pc%particles(ll), bin_func_args)
+       ix                   = binner%bin_func(pc%particles(ll))
        bin_ixs(ll)          = ix
        n_part_per_bin(ix)   = n_part_per_bin(ix) + 1
     end do
 
-    call MPI_ALLREDUCE(MPI_IN_PLACE, n_part_per_bin, n_bins, &
+    call MPI_ALLREDUCE(MPI_IN_PLACE, n_part_per_bin, binner%n_bins, &
          MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
 
     ! Sort by bin_ixs
@@ -139,16 +141,16 @@ contains
     ! Find the split_ix(:) s.t. task n will hold particles with ix >
     ! split_ix(n-1) and ix <= split_ix(n)
     split_ix(-1)              = 0
-    split_ix(ntasks)          = n_bins
+    split_ix(ntasks)          = binner%n_bins
     rank                      = 0
     n_behind                  = 0
     n_part_interval_task(:,:) = 0
     n_part_interval           = 0
 
-    do ix = 1, n_bins
+    do ix = 1, binner%n_bins
        n_part_interval = n_part_interval + n_part_per_bin(ix)
 
-       if (n_part_interval >= n_part_mean .or. ix == n_bins) then
+       if (n_part_interval >= n_part_mean .or. ix == binner%n_bins) then
           split_ix(rank)  = ix
           n_part_interval = 0
           part_count      = 0

@@ -51,7 +51,7 @@ module m_particle_core
      type(RNG_t)                  :: rng
      integer                      :: separator(100)  ! Separate rng data
 
-     procedure(part_to_logic_f), pointer, nopass :: outside_check => null()
+     procedure(p_to_logic_f), pointer, nopass :: outside_check => null()
      procedure(coll_callback_p), pointer, nopass :: coll_callback => null()
 
    contains
@@ -59,11 +59,9 @@ module m_particle_core
      procedure, non_overridable :: set_coll_callback
      procedure, non_overridable :: set_outside_check
      procedure, non_overridable :: resize_part_list
-     procedure, non_overridable :: destroy
      procedure, non_overridable :: remove_particles
      procedure, non_overridable :: advance
      procedure, non_overridable :: clean_up
-     procedure, non_overridable :: sample_coll_time
      procedure, non_overridable :: create_part
      procedure, non_overridable :: add_part
      procedure, non_overridable :: remove_part
@@ -93,34 +91,46 @@ module m_particle_core
      procedure, non_overridable :: get_coeffs
   end type PC_t
 
-  interface
+  type, abstract, public :: PC_bin_t
+     integer :: n_bins
+   contains
+     procedure(bin_f), deferred :: bin_func
+  end type PC_bin_t
+
+  abstract interface
      subroutine coll_callback_p(my_part, c_ix, c_type)
        import
        type(PC_part_t), intent(in) :: my_part
        integer, intent(in) :: c_ix, c_type
      end subroutine coll_callback_p
 
-     subroutine part_to_r3_p(my_part, my_vec)
+     subroutine p_to_r3_p(my_part, my_vec)
        import
        type(PC_part_t), intent(in) :: my_part
        real(dp), intent(out)       :: my_vec(3)
-     end subroutine part_to_r3_p
+     end subroutine p_to_r3_p
 
-     function part_to_r3_f(my_part) result(my_vec)
+     function p_to_r3_f(my_part) result(my_vec)
        import
        type(PC_part_t), intent(in) :: my_part
        real(dp)                    :: my_vec(3)
-     end function part_to_r3_f
+     end function p_to_r3_f
 
-     real(dp) function part_to_r_f(my_part)
+     real(dp) function p_to_r_f(my_part)
        import
        type(PC_part_t), intent(in) :: my_part
-     end function part_to_r_f
+     end function p_to_r_f
 
-     logical function part_to_logic_f(my_part)
+     logical function p_to_logic_f(my_part)
        import
        type(PC_part_t), intent(in) :: my_part
-     end function part_to_logic_f
+     end function p_to_logic_f
+
+     integer function bin_f(binner, my_part)
+       import
+       class(PC_bin_t), intent(in) :: binner
+       type(PC_part_t), intent(in) :: my_part
+     end function bin_f
   end interface
 
   ! Public procedures
@@ -138,10 +148,10 @@ contains
     use m_cross_sec
     use m_units_constants
     class(PC_t), intent(inout) :: self
-    type(CS_t), intent(in) :: cross_secs(:)
-    integer, intent(in)       :: lookup_table_size
-    real(dp), intent(in)      :: mass, max_en_eV
-    integer, intent(in)       :: n_part_max
+    type(CS_t), intent(in)     :: cross_secs(:)
+    integer, intent(in)        :: lookup_table_size
+    real(dp), intent(in)       :: mass, max_en_eV
+    integer, intent(in)        :: n_part_max
 
     if (size(cross_secs) < 1) then
        print *, "No cross sections given, will abort"
@@ -167,12 +177,12 @@ contains
 
   subroutine set_outside_check(self, pptr)
     class(PC_t), intent(inout) :: self
-    procedure(part_to_logic_f) :: pptr
+    procedure(p_to_logic_f) :: pptr
     self%outside_check => pptr
   end subroutine set_outside_check
 
   subroutine get_colls_of_type(pc, ctype, ixs)
-    class(PC_t), intent(inout) :: pc
+    class(PC_t), intent(in) :: pc
     integer, intent(in) :: ctype
     integer, intent(inout), allocatable :: ixs(:)
     integer :: nn, i
@@ -189,14 +199,8 @@ contains
     end do
   end subroutine get_colls_of_type
 
-  subroutine destroy(self)
-    class(PC_t), intent(inout) :: self
-    print *, "TODO"
-    stop
-  end subroutine destroy
-
   function get_mass(self) result(mass)
-    class(PC_t), intent(inout) :: self
+    class(PC_t), intent(in) :: self
     real(dp) :: mass
     mass = self%mass
   end function get_mass
@@ -247,7 +251,7 @@ contains
 
     do
        ! Get the next collision time
-       coll_time = self%sample_coll_time()
+       coll_time = sample_coll_time(self%rng%uni_01(), self%inv_max_rate)
        if (coll_time > self%particles(ll)%t_left) exit
 
        ! Set x,v at the collision time
@@ -309,9 +313,9 @@ contains
 
   !> Returns a sample from the exponential distribution of the collision times
   ! RNG_uniform() is uniform on [0,1), but log(0) = nan, so we take 1 - RNG_uniform()
-  real(dp) function sample_coll_time(self)
-    class(PC_t), intent(inout) :: self
-    sample_coll_time = -log(1 - self%rng%uni_01()) * self%inv_max_rate
+  real(dp) function sample_coll_time(uni_01, inv_max_rate)
+    real(dp), intent(in) :: uni_01, inv_max_rate
+    sample_coll_time = -log(1 - uni_01) * inv_max_rate
   end function sample_coll_time
 
   integer function get_coll_index(rate_lt, n_colls, max_rate, &
@@ -451,7 +455,7 @@ contains
 
   subroutine set_accel(self, accel_func)
     class(PC_t), intent(inout) :: self
-    procedure(part_to_r3_f)    :: accel_func
+    procedure(p_to_r3_f)    :: accel_func
     integer                    :: ll
 
     do ll = 1, self%n_part
@@ -470,7 +474,7 @@ contains
     use m_units_constants
     class(PC_t), intent(inout) :: self
     real(dp), intent(IN)      :: dt
-    procedure(part_to_r3_p) :: accel_func
+    procedure(p_to_r3_p) :: accel_func
     integer                   :: ll
     real(dp)                  :: new_accel(3)
 
@@ -506,16 +510,22 @@ contains
   end subroutine clean_up
 
   subroutine add_part(self, part)
-    class(PC_t), intent(inout) :: self
-    type(PC_part_t), intent(in)    :: part
-    self%n_part = self%n_part + 1
+    class(PC_t), intent(inout)  :: self
+    type(PC_part_t), intent(in) :: part
+    self%n_part                 = self%n_part + 1
     self%particles(self%n_part) = part
   end subroutine add_part
 
   subroutine create_part(self, x, v, a, weight, t_left)
     class(PC_t), intent(inout) :: self
     real(dp), intent(IN)       :: x(3), v(3), a(3), weight, t_left
-    call self%add_part(PC_part_t(x, v, a, weight, t_left))
+    type(PC_part_t)            :: my_part
+    my_part%x      = x
+    my_part%v      = v
+    my_part%a      = a
+    my_part%w      = weight
+    my_part%t_left = t_left
+    call self%add_part(my_part)
   end subroutine create_part
 
   !> Mark particle for removal
@@ -565,13 +575,13 @@ contains
 
   !> Return the number of real particles
   real(dp) function get_num_real_part(self)
-    class(PC_t), intent(inout) :: self
+    class(PC_t), intent(in) :: self
     get_num_real_part = sum(self%particles(1:self%n_part)%w)
   end function get_num_real_part
 
   !> Return the number of simulation particles
   integer function get_num_sim_part(self)
-    class(PC_t), intent(inout) :: self
+    class(PC_t), intent(in) :: self
     get_num_sim_part = self%n_part
   end function get_num_sim_part
 
@@ -614,7 +624,7 @@ contains
   end subroutine compute_vector_sum
 
   subroutine compute_scalar_sum(self, pptr, my_sum)
-    class(PC_t), intent(inout) :: self
+    class(PC_t), intent(in) :: self
     interface
        subroutine pptr(my_part, my_real)
          import
@@ -650,7 +660,7 @@ contains
   end function PC_en_to_vel
 
   subroutine check_space(self, n_req)
-    class(PC_t), intent(inout) :: self
+    class(PC_t), intent(in) :: self
     integer, intent(in) :: n_req
     if (n_req > size(self%particles)) then
        print *, "Particle list too small!"
@@ -711,7 +721,7 @@ contains
   subroutine sort(self, sort_func)
     use m_mrgrnk
     class(PC_t), intent(inout)   :: self
-    procedure(part_to_r_f)    :: sort_func
+    procedure(p_to_r_f)    :: sort_func
 
     integer                      :: ix, n_part
     integer, allocatable         :: part_ixs(:)
@@ -738,8 +748,8 @@ contains
   subroutine histogram(self, hist_func, filter_f, &
        filter_args, x_values, y_values)
     use m_mrgrnk
-    class(PC_t), intent(inout) :: self
-    procedure(part_to_r_f)   :: hist_func
+    class(PC_t), intent(in) :: self
+    procedure(p_to_r_f)   :: hist_func
     real(dp), intent(in)        :: x_values(:)
     real(dp), intent(out)       :: y_values(:)
     interface
@@ -827,7 +837,8 @@ contains
          type(RNG_t), intent(inout)   :: rng
        end subroutine pptr_split
     end interface
-    procedure(part_to_r_f)    :: weight_func
+
+    procedure(p_to_r_f)    :: weight_func
 
     integer, parameter           :: num_neighbors = 1
     real(dp), parameter          :: large_ratio   = 1.5_dp, &
@@ -919,6 +930,7 @@ contains
 
     ! Split particles. These are at the end of part_copy
     num_split = count(weight_ratios >= large_ratio)
+    print *, "num_split:", num_split
 
     do ix = num_part - num_split + 1, num_part
        ! Change part_copy(ix), then add an extra particle at then end of pl
@@ -928,7 +940,9 @@ contains
        call self%add_part(part_out(2))
     end do
 
+    print *, "clean up"
     call self%clean_up()
+    print *, "done"
   end subroutine merge_and_split
 
   ! Merge two particles into part_a, should remove part_b afterwards
@@ -1063,19 +1077,11 @@ contains
     end do
   end subroutine PC_share
 
-  subroutine PC_reorder_by_bins(pcs, bin_func, n_bins, bin_func_args)
+  subroutine PC_reorder_by_bins(pcs, binner)
     use m_mrgrnk
     use m_linked_list
     type(PC_t), intent(inout) :: pcs(:)
-    interface
-       integer function bin_func(my_part, r_args)
-         import
-         type(PC_part_t), intent(in) :: my_part
-         real(dp), intent(in) :: r_args(:)
-       end function bin_func
-    end interface
-    integer, intent(in) :: n_bins
-    real(dp), intent(in) :: bin_func_args(:)
+    class(PC_bin_t), intent(in) :: binner
     integer, allocatable :: bin_counts(:,:)
     integer, allocatable :: bin_counts_sum(:)
     integer, allocatable :: bin_owner(:)
@@ -1091,9 +1097,9 @@ contains
     n_pc = size(pcs)
     n_avg = ceiling(sum(pcs(:)%n_part) / real(n_pc, dp))
 
-    allocate(bin_counts(n_bins, n_pc))
-    allocate(bin_counts_sum(n_bins))
-    allocate(bin_owner(n_bins))
+    allocate(bin_counts(binner%n_bins, n_pc))
+    allocate(bin_counts_sum(binner%n_bins))
+    allocate(bin_owner(binner%n_bins))
     allocate(pcs_bins(n_pc))
     bin_counts(:, :) = 0
 
@@ -1101,7 +1107,7 @@ contains
     do ip = 1, n_pc
        allocate(pcs_bins(ip)%ib(pcs(ip)%n_part))
        do ll = 1, pcs(ip)%n_part
-          ib                  = bin_func(pcs(ip)%particles(ll), bin_func_args)
+          ib                  = binner%bin_func(pcs(ip)%particles(ll))
           pcs_bins(ip)%ib(ll) = ib
           bin_counts(ib, ip)  = bin_counts(ib, ip) + 1
        end do
@@ -1112,7 +1118,7 @@ contains
     ip             = 1
 
     ! Set the owners of the bins
-    do ib = 1, n_bins
+    do ib = 1, binner%n_bins
        tmp_sum = tmp_sum + bin_counts_sum(ib)
        bin_owner(ib) = ip
        if (tmp_sum >= n_avg) then
