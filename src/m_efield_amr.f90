@@ -89,35 +89,36 @@ contains
       use m_config
       use m_phys_domain
       type(CFG_t), intent(in) :: cfg
-      integer             :: dyn_size
+      integer             :: dyn_size, ref_size
 
-      E_min_grid_size = CFG_get_int(cfg, "ref_min_grid_size")
-      E_min_grid_separation = CFG_get_int(cfg, "ref_min_grid_separation")
-      E_ref_lvl_electrode = CFG_get_int(cfg, "ref_min_lvl_electrode")
+      call CFG_get(cfg, "ref_min_grid_size", E_min_grid_size)
+      call CFG_get(cfg, "ref_min_grid_separation", E_min_grid_separation)
+      call CFG_get(cfg, "ref_min_lvl_electrode", E_ref_lvl_electrode)
 
-      dyn_size = CFG_get_size(cfg, "sim_efield_times")
+      call CFG_get_size(cfg, "sim_efield_times", dyn_size)
       allocate(E_efield_times(dyn_size))
       allocate(E_efield_values(dyn_size))
-      call CFG_get_array(cfg, "sim_efield_values", E_efield_values)
-      call CFG_get_array(cfg, "sim_efield_times", E_efield_times)
+      call CFG_get(cfg, "sim_efield_values", E_efield_values)
+      call CFG_get(cfg, "sim_efield_times", E_efield_times)
 
-      E_bc_type      = CFG_get_int(cfg, "elec_bc_type")
-      dyn_size        = CFG_get_size(cfg, "ref_delta_values")
-
-      if (dyn_size /= CFG_get_size(cfg, "ref_max_efield_at_delta")) then
+      call CFG_get(cfg, "elec_bc_type", E_bc_type)
+      call CFG_get_size(cfg, "ref_delta_values", dyn_size)
+      call CFG_get_size(cfg, "ref_max_efield_at_delta", ref_size)
+      
+      if (dyn_size /= ref_size) then
          print *, "ref_efield_values and ref_delta_values have unequal size"
          stop
       end if
 
       allocate( E_dr_vs_efield(2, dyn_size) )
-      call CFG_get_array(cfg, "ref_delta_values", E_dr_vs_efield(1, :))
-      call CFG_get_array(cfg, "ref_max_efield_at_delta", E_dr_vs_efield(2, :))
+      call CFG_get(cfg, "ref_delta_values", E_dr_vs_efield(1, :))
+      call CFG_get(cfg, "ref_max_efield_at_delta", E_dr_vs_efield(2, :))
 
-      E_ref_min_elec_dens = CFG_get_real(cfg, "ref_min_elec_dens")
-      E_ref_max_lvl = CFG_get_int(cfg, "ref_max_levels")
-      E_grid_buffer_width = CFG_get_int(cfg, "ref_buffer_width")
-      call CFG_get_array(cfg, "grid_plasma_min_rel_pos", E_ref_min_xyz)
-      call CFG_get_array(cfg, "grid_plasma_max_rel_pos", E_ref_max_xyz)
+      call CFG_get(cfg, "ref_min_elec_dens", E_ref_min_elec_dens)
+      call CFG_get(cfg, "ref_max_levels", E_ref_max_lvl)
+      call CFG_get(cfg, "ref_buffer_width", E_grid_buffer_width)
+      call CFG_get(cfg, "grid_plasma_min_rel_pos", E_ref_min_xyz)
+      call CFG_get(cfg, "grid_plasma_max_rel_pos", E_ref_max_xyz)
       E_ref_min_xyz = E_ref_min_xyz * PD_r_max
       E_ref_max_xyz = E_ref_max_xyz * PD_r_max
 
@@ -365,6 +366,7 @@ contains
          call compute_field_recursive(root_grid)
 
          if (PD_use_elec) call check_elec_voltage(time, E_prev_max_diff)
+         print *, "Field has been computed"
       end if
 
       call E_share_vars((/E_i_Ex, E_i_Ey, E_i_Ez/), root)
@@ -403,6 +405,8 @@ contains
       Ny = amr_grid%Nr(2)
       Nz = amr_grid%Nr(3)
 
+      print *, amr_grid%lvl, "Computing potential", Nx, Ny, Nz
+
       req_workspace = 30 + Nx + Ny + 5*Nz + max(Nx, Ny, Nz) + 7*(Nx/2 + Ny/2)
 
       if (req_workspace > size_workspace) then
@@ -427,13 +431,15 @@ contains
       end if
 
       ! The input array holds the boundary condition on the sides and the source term in its interior
-      amr_grid%vars(2:Nx-1, 2:Ny-1, 2:Nz-1, E_i_pot) = amr_grid%vars(2:Nx-1, 2:Ny-1, 2:Nz-1, E_i_src)
+      amr_grid%vars(2:Nx-1, 2:Ny-1, 2:Nz-1, E_i_pot) = &
+           amr_grid%vars(2:Nx-1, 2:Ny-1, 2:Nz-1, E_i_src)
 
       call hw3crt(amr_grid%r_min(1), amr_grid%r_max(1), Nx-1, 1, dummy, dummy, &
            amr_grid%r_min(2), amr_grid%r_max(2), Ny-1, 1, dummy, dummy, &
            amr_grid%r_min(3), amr_grid%r_max(3), Nz-1, 1, dummy, dummy, &
-           0.0d0, Nx, Ny, amr_grid%vars(:,:,:, E_i_pot), dummy(1), ierror, workspace)
-      ! print *, "maxval pot", maxval(amr_grid%vars(:,:,:, E_i_pot)), minval(amr_grid%vars(:,:,:, E_i_pot))
+           0.0d0, Nx, Ny, amr_grid%vars(:,:,:, E_i_pot), dummy(1), &
+           ierror, workspace)
+
       if (ierror /= 0) then
          print *, "HW3CRT: ierror = ", ierror
          stop
@@ -573,7 +579,7 @@ contains
       end if
 
     if (PD_use_elec) then
-       if (EL_around_electrode_tip(xyz)) then
+       if (EL_around_elec_tip(xyz)) then
           ! Refine around electrode tip
           need_to_refine = need_to_refine .or. amr_grid%lvl < E_ref_lvl_electrode
        end if

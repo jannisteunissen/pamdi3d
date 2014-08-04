@@ -8,6 +8,23 @@ module m_particle
   real(dp) :: PM_max_weight
   real(dp) :: PM_part_per_cell
   real(dp) :: PM_coord_weights(6)
+  real(dp) :: PM_max_distance
+
+  abstract interface
+     integer function p_to_int(my_part)
+       import
+       type(PC_part_t), intent(in) :: my_part
+     end function p_to_int
+  end interface
+  
+  type, extends(PC_bin_t) :: bin_t
+     real(dp) :: x_min
+     real(dp) :: inv_dx
+   contains
+     procedure :: bin_func => PM_bin_func
+  end type bin_t
+
+  type(bin_t), public :: PM_binner
 
   ! Public methods
   public :: PM_initialize
@@ -20,21 +37,32 @@ module m_particle
 
 contains
 
-  subroutine PM_initialize(pc, cross_secs, tbl_size, max_eV, n_part_max, &
-       max_weight, part_per_cell, coord_weights)
+  subroutine PM_initialize(pc, cross_secs, cfg)
     use m_units_constants
     use m_cross_sec
+    use m_config
+    use m_phys_domain
     type(PC_t), intent(inout) :: pc
     type(CS_t), intent(in)    :: cross_secs(:)
-    integer, intent(in)       :: tbl_size, n_part_max
-    real(dp), intent(in)      :: max_eV, max_weight, part_per_cell, coord_weights(6)
+    type(CFG_t), intent(in)   :: cfg
 
-    PM_max_weight    = max_weight
-    PM_part_per_cell = part_per_cell
-    PM_coord_weights = coord_weights
-    call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_eV, n_part_max)
+    integer                   :: n_part_max, tbl_size
+    real(dp) :: max_ev
+
+    call CFG_get(cfg, "part_max_weight", PM_max_weight)
+    call CFG_get(cfg, "part_per_cell", PM_part_per_cell)
+    call CFG_get(cfg, "part_merge_coord_weights", PM_coord_weights)
+    call CFG_get(cfg, "part_merge_max_distance", PM_max_distance)
+    call CFG_get(cfg, "part_max_num", n_part_max)
+    call CFG_get(cfg, "part_lkp_tbl_size", tbl_size)
+    call CFG_get(cfg, "part_max_ev", max_ev)
+
+    call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_ev, n_part_max)
     call pc%set_coll_callback(coll_callback)
     call pc%set_outside_check(outside_check)
+
+    PM_binner%n_bins = PD_size(1)
+    PM_binner%inv_dx = 1/PD_dr(1)
   end subroutine PM_initialize
 
   subroutine coll_callback(my_part, c_ix, c_type)
@@ -57,11 +85,11 @@ contains
     type(PC_part_t), intent(in) :: my_part
     outside_check = PD_outside_domain(my_part%x)
   end function outside_check
-  
-  subroutine PM_create_ei_pair(pc, x, v, a, w, t_left)
+
+  subroutine PM_create_ei_pair(pc, lx, v, a, w, t_left)
     use m_efield_amr
     type(PC_t), intent(inout)      :: pc
-    real(dp), intent(in)           :: x(3)
+    real(dp), intent(in)           :: lx(3)
     real(dp), intent(in), optional :: v(3), a(3), w, t_left
     real(dp)                       :: lv(3), la(3), lw, lt_left
 
@@ -70,16 +98,13 @@ contains
     lw      = 1; if (present(w)) lw = w
     lt_left = 0; if (present(t_left)) lt_left = t_left
 
-    call pc%create_part(x, v, a, w, t_left)
-    call E_add_to_var(E_i_pion, x, w)
+    call pc%create_part(lx, lv, la, lw, lt_left)
+    call E_add_to_var(E_i_pion, lx, lw)
   end subroutine PM_create_ei_pair
 
   subroutine PM_adjust_weights(pc)
     type(PC_t), intent(inout) :: pc
-    real(dp) :: coord_weights(6)
-    real(dp) :: max_distance
-    
-    call pc%merge_and_split(PM_coord_weights, max_distance, &
+    call pc%merge_and_split(PM_coord_weights, PM_max_distance, &
          weight_func, PC_merge_part_rxv, PC_split_part)
   end subroutine PM_adjust_weights
 
@@ -101,13 +126,13 @@ contains
     logical, intent(in) :: only_store
 
     integer :: i, n
-    real(dp) :: diff, total, fld(3)
+    real(dp) :: fld(3)
     real(dp), allocatable, save :: pos_samples(:, :)
     real(dp), allocatable, save :: fld_samples(:, :)
 
     if (pc%n_part < 1) then
-       print *, "PM_fld_error: not enough particles"
-       stop
+       fld_err = 0
+       return
     end if
 
     if (only_store) then
@@ -124,16 +149,10 @@ contains
           fld_samples(:,i) = E_get_field(pos_samples(:,i))
        end do
     else
-       total = 0
-       diff = 0
-
-       do i = 1, n_samples
+       do i = 1, size(pos_samples, 2)
           fld = E_get_field(pos_samples(:,i))
-          total = total + norm2(fld_samples(:,i) )
-          diff  = diff + norm2(fld - fld_samples(:,i) )
+          fld_err  = max(fld_err, norm2(fld - fld_samples(:,i)))
        end do
-
-       fld_err = diff / (total + epsilon(1.0_dp))
     end if
   end subroutine PM_fld_error
 
@@ -158,15 +177,15 @@ contains
     dt_max = 1.0e-12_dp
   end function PM_get_max_dt
 
-  function PM_bin_func(my_part, real_args) result(i_bin)
+  function PM_bin_func(binner, my_part) result(i_bin)
+    class(bin_t), intent(in)     :: binner
     type(PC_part_t), intent(in) :: my_part
-    real(dp), intent(in) :: real_args(:)
-    integer :: i_bin
-    real(dp) :: x, x_min, inv_dx
 
+    integer                     :: i_bin
+    real(dp)                    :: x, x_min, inv_dx
     x      = my_part%x(1)
-    x_min  = real_args(1)
-    inv_dx = real_args(2)
-    i_bin  = 1 + int((x - x_min) * inv_dx)
+    i_bin  = 1 + int((x - binner%x_min) * binner%inv_dx)
+    i_bin  = max(1, i_bin)
+    i_bin  = min(binner%n_bins, i_bin)
   end function PM_bin_func
 end module m_particle

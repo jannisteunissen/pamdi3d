@@ -12,16 +12,13 @@ module m_phys_domain
 
 contains
   
-  subroutine PD_set(rmax, npoints, use_elec)
-    real(dp), intent(in) :: rmax(3)
-    integer              :: npoints(3)
-    logical :: use_elec
-    
-    PD_r_max = rmax
-    PD_size  = npoints
-    PD_dr    = rmax / (npoints-1)
-
-    PD_use_elec = use_elec
+  subroutine PD_set(cfg)
+    use m_config
+    type(CFG_t), intent(in) :: cfg
+    call CFG_get(cfg, "grid_size", PD_size)
+    call CFG_get(cfg, "grid_delta", PD_dr)
+    call CFG_get(cfg, "sim_use_electrode", PD_use_elec)
+    PD_r_max = PD_size * PD_dr
   end subroutine PD_set
 
   ! Checks whether pos is outside the computational domain or inside the

@@ -46,8 +46,9 @@ contains
       use m_units_constants
       use m_config
       type(CFG_t), intent(in) :: cfg
+      integer :: t_size
       real(dp) :: temp_vec(2)
-      MISC_tau_excited = CFG_get_real(cfg, "PI_meanLifeTimeExcited")
+      call CFG_get(cfg, "photoi_mean_life_time_excited", MISC_tau_excited)
 
       MISC_frac_O2 = GAS_get_fraction("O2")
 
@@ -59,7 +60,7 @@ contains
       MISC_O2_bgdens = GAS_get_number_dens() * GAS_get_fraction("O2")
       MISC_N2_bgdens = GAS_get_number_dens() * GAS_get_fraction("N2")
 
-      call CFG_get_array(cfg, "PI_absorpInvLengths", temp_vec)
+      call CFG_get(cfg, "photoi_absorp_inv_lengths", temp_vec)
       MISC_min_inv_abs_len = temp_vec(1) * MISC_frac_O2 * GAS_get_pressure()
       MISC_max_inv_abs_len = temp_vec(2) * MISC_frac_O2 * GAS_get_pressure()
 
@@ -67,17 +68,19 @@ contains
       print *, "Min absorbp. length for photoionization ", 1.0d3 / MISC_max_inv_abs_len, "mm"
 
       MISC_quench_fac = (30.0D0 * UC_torr_to_bar) / (GAS_get_pressure() + (30.0D0 * UC_torr_to_bar))
-      MISC_table_size = CFG_get_size(cfg, "PI_EfieldTable")
+      call CFG_get_size(cfg, "photoi_efield_table", MISC_table_size)
 
-      if (MISC_table_size /= CFG_get_size(cfg, "PI_efficiencyTable")) then
-         print *, "Make sure MISC_efficiencyTable and MISC_EfieldTable have the same size"
+      call CFG_get_size(cfg, "photoi_efficiency_table", t_size)
+      if (MISC_table_size /= t_size) then
+         print *, "Make sure photoi_efield_table and photoi_efficiency_table ",&
+              "have the same size"
          stop
       end if
 
       allocate( MISC_photo_eff_table(2, MISC_table_size) )
 
-      call CFG_get_array(cfg, "PI_EfieldTable", MISC_photo_eff_table(1,:) )
-      call CFG_get_array(cfg, "PI_efficiencyTable", MISC_photo_eff_table(2,:) )
+      call CFG_get(cfg, "photoi_EfieldTable", MISC_photo_eff_table(1,:) )
+      call CFG_get(cfg, "photoi_efficiencyTable", MISC_photo_eff_table(2,:) )
 
    end subroutine MISC_initialize
 
@@ -122,6 +125,7 @@ contains
       use m_phys_domain
       use m_random
       use m_particle_core
+      use m_particle
       type(PC_t), intent(inout) :: pc
       type(RNG_t), intent(inout) :: rng
       type(amr_grid_t), intent(inout) :: amr_grid
@@ -130,7 +134,6 @@ contains
       integer                         :: i, j, k, Nx, Ny, Nz
       integer                         :: n, nc, i_min(3), i_max(3), n_photons
       real(dp)                        :: xyz(3), x_end(3), flylen, chi, psi, e_str, energy_frac
-      real(dp) :: v(3), a(3), w, t_left
 
       Nx = amr_grid%Nr(1)
       Ny = amr_grid%Nr(2)
@@ -176,14 +179,9 @@ contains
                   x_end(2)    = xyz(2) + flylen * sin(chi) * sin(psi)
                   x_end(3)    = xyz(3) + flylen * cos(chi)
 
-                  v      = 0
-                  a      = 0
-                  w      = 1
-                  t_left = 0
-
                    ! Create electron-ion pair with excess enery of photon
                   if (.not. PD_outside_domain(x_end)) &
-                       call pc%create_part(x_end, v, a, w, t_left)
+                       call PM_create_ei_pair(pc, x_end)
                end do
             end do
          end do
@@ -213,6 +211,7 @@ contains
    subroutine update_detachment(pc, rng, amr_grid)
       use m_efield_amr
       use m_particle_core
+      use m_particle
       use m_random
       use m_phys_domain
       type(PC_t), intent(inout) :: pc
@@ -223,7 +222,6 @@ contains
       integer                         :: i, j, k, Nx, Ny, Nz
       integer                         :: n, nc, i_min(3), i_max(3), n_detach
       real(dp)                        :: xyz(3), e_str
-      real(dp) :: v(3), a(3), w, t_left
 
       Nx = amr_grid%Nr(1)
       Ny = amr_grid%Nr(2)
@@ -268,13 +266,8 @@ contains
                MISC_sum_detach = MISC_sum_detach + n_detach ! Global variable :(
 
                do n = 1, n_detach
-                  ! Give a small energy up to 1 eV
-                  v = 0
-                  a = 0
-                  w = 1
-                  t_left = 0
                   if (.not. PD_outside_domain(xyz)) &
-                       call pc%create_part(xyz, v, a, w, t_left)
+                       call PM_create_ei_pair(pc, xyz)
                end do
             end do
          end do

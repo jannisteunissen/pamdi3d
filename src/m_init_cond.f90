@@ -51,10 +51,10 @@ contains
          maxFac, tempVec(3), lineDirection(3), lineBase(3)
 
 
-    nIonPairs = CFG_get_real(cfg, "init_nIonPairs")
-    init_weight        = CFG_get_int(cfg, "init_weightFactor")
-    backgroundDensity = CFG_get_real(cfg, "init_backgroundDensity")
-    bgO2MinDensity    = CFG_get_real(cfg, "init_O2MinBackgroundDens")
+    call CFG_get(cfg, "init_n_ion_pairs", nIonPairs)
+    call CFG_get(cfg, "init_weight", init_weight)
+    call CFG_get(cfg, "init_bg_dens", backgroundDensity)
+    call CFG_get(cfg, "init_o2m_bg_dens", bgO2MinDensity)
 
     ! Set the background negative ions, for detachment
     call E_set_vars((/E_i_O2m, E_i_pion/), (/bgO2MinDensity, bgO2MinDensity/))
@@ -71,12 +71,12 @@ contains
     print *, "Setting up the initial condition"
 
     ! Set the initial conditions
-    initCond = CFG_get_string(cfg, "init_condType")
+    call CFG_get(cfg, "init_cond_type", initCond)
 
     select case (initCond)
     case ('seed')
        ! Electron/ion pairs start at fixed position
-       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
+       call CFG_get(cfg, "init_rel_pos", initSeedPos)
        do ll = 1, int (nIonPairs / init_weight)
           pos = initSeedPos * PD_r_max
           call PM_create_ei_pair(pc, pos, w=init_weight)
@@ -84,8 +84,8 @@ contains
 
     case ('double_seed')
        ! Electron/ion pairs start at fixed position
-       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
-       radius = CFG_get_real(cfg, "init_seedPosRadius")
+       call CFG_get(cfg, "init_rel_pos", initSeedPos)
+       call CFG_get(cfg, "init_seed_pos_radius", radius)
 
        do ll = 1, int(nIonPairs / (2 * init_weight))
           pos = initSeedPos * PD_r_max
@@ -102,8 +102,8 @@ contains
     case ('Gaussian')
        ! Electron/ion pairs are distributed as a 3D Gaussian distribution
        ! with mean initSeedPos and sigma init_seedPosRadius
-       radius = CFG_get_real(cfg, "init_seedPosRadius")
-       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
+       call CFG_get(cfg, "init_seed_pos_radius", radius)
+       call CFG_get(cfg, "init_rel_pos", initSeedPos)
        initSeedPos = initSeedPos * PD_r_max
 
        do ll = 1, int (nIonPairs / init_weight)
@@ -120,9 +120,9 @@ contains
        end do
 
     case ('laserLine')
-       radius = CFG_get_real(cfg, "init_seedPosRadius")
-       call CFG_get_array(cfg, "init_laserDirection", lineDirection)
-       call CFG_get_array(cfg, "init_laserLineOffset", lineBase)
+       call CFG_get(cfg, "init_seed_pos_radius", radius)
+       call CFG_get(cfg, "init_laser_direction", lineDirection)
+       call CFG_get(cfg, "init_laser_line_offset", lineBase)
 
        ! Find first orthogonal vector
        if (abs(lineDirection(2)) < epsilon(1.0d0)) then
@@ -158,7 +158,7 @@ contains
        end do
 
        lineLen = norm2((maxFac - minFac) * lineDirection * PD_r_max)
-       temp = CFG_get_real(cfg, "init_lineDens")
+       call CFG_get(cfg, "init_line_dens", temp)
        nIonPairs = temp * radius**2 * lineLen
 
        print *, "Laser nIonPairs", nIonPairs/init_weight, lineLen, minFac, maxFac
@@ -176,8 +176,8 @@ contains
     case ('Gaussian1D')
        ! Electron/ion pairs are distributed as a 1D Gaussian distribution
        ! with mean initSeedPos and sigma init_seedPosRadius
-       radius = CFG_get_real(cfg, "init_seedPosRadius")
-       call CFG_get_array(cfg, "init_relSeedPos", initSeedPos)
+       call CFG_get(cfg, "init_seed_pos_radius", radius)
+       call CFG_get(cfg, "init_rel_pos", initSeedPos)
        initSeedPos = initSeedPos * PD_r_max
 
        do ll = 1, int (nIonPairs / init_weight)

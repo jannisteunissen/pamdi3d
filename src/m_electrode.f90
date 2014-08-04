@@ -35,7 +35,7 @@ module m_electrode
   public :: EL_setCharge, EL_setWeightFactor, EL_initialize, EL_inside_elec, EL_getRadius
   public :: EL_getBottomPos
   public :: EL_getTopPos
-  public :: EL_around_electrode_tip
+  public :: EL_around_elec_tip
 
 contains
 
@@ -54,14 +54,14 @@ contains
 
     ! Set up a basic electrode, with conical part and cylindrical part
     ! This should be moved to a subroutine, so that we can select different electrodes
-    EL_voltage     = CFG_get_real(cfg, "electrode_voltage")
-    EL_Hcone     = CFG_get_real(cfg, "electrode_hcone")
-    EL_Rcyl      = CFG_get_real(cfg, "electrode_rcyl")
-    EL_RcTip     = CFG_get_real(cfg, "electrode_rc_tip")
-    EL_RcTrans   = CFG_get_real(cfg, "electrode_rc_trans")
-    EL_spacing   = CFG_get_real(cfg, "electrode_spacing")
+    call CFG_get(cfg, "elec_voltage", EL_voltage)
+    call CFG_get(cfg, "elec_h_cone", EL_Hcone)
+    call CFG_get(cfg, "elec_r_cyl", EL_Rcyl)
+    call CFG_get(cfg, "elec_rc_tip", EL_RcTip)
+    call CFG_get(cfg, "elec_rc_trans", EL_RcTrans)
+    call CFG_get(cfg, "elec_spacing", EL_spacing)
 
-    call CFG_get_array(cfg, "electrode_xyz_rel_pos", EL_xyzPos)
+    call CFG_get(cfg, "elec_xyz_rel_pos", EL_xyzPos)
     EL_topAngle  = atan(EL_Rcyl / EL_Hcone)
     H_cone_eff = EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - 1.0D0)
     EL_Hcyl      = EL_xyzPos(3) * r_max(3) - H_cone_eff - EL_spacing
@@ -72,12 +72,12 @@ contains
     EL_TransCurveStartZ = EL_Hcyl - EL_RcTrans * tan(EL_topAngle/2.0D0)
     EL_TransCurveEndZ   = EL_TransCurveStartZ + EL_RcTrans * sin(EL_topAngle)
     EL_tipCurveBeginZ   = EL_Hcyl + EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - sin(EL_topAngle))
-    n_time_points = CFG_get_size(cfg, "elec_times")
+    call CFG_get_size(cfg, "elec_times", n_time_points)
     allocate(elec_time_voltage(n_time_points, 2))
-    call CFG_get_array(cfg, "elec_times", elec_time_voltage(:, 1))
-    call CFG_get_array(cfg, "elec_voltages", elec_time_voltage(:,2))
+    call CFG_get(cfg, "elec_times", elec_time_voltage(:, 1))
+    call CFG_get(cfg, "elec_voltages", elec_time_voltage(:,2))
 
-    if (myrank == root) call generate_electrode_surface(rng)
+    if (myrank == root) call generate_elec_surface(rng)
 
   end subroutine EL_initialize
 
@@ -107,7 +107,7 @@ contains
     end if
   end function EL_getRadius
 
-  subroutine generate_electrode_surface(rng)
+  subroutine generate_elec_surface(rng)
     use m_units_constants
     use m_random
     type(RNG_t), intent(inout) :: rng
@@ -181,7 +181,7 @@ contains
     end do
 
     deallocate( nHorizontal )
-  end subroutine generate_electrode_surface
+  end subroutine generate_elec_surface
 
   !> Return .TRUE. if the location (x,y,z) is inside the simulated electrode
   logical function EL_inside_elec(pos)
@@ -210,14 +210,14 @@ contains
 
   end function EL_inside_elec
 
-  logical function EL_around_electrode_tip(pos)
+  logical function EL_around_elec_tip(pos)
      real(dp), intent(IN) :: pos(3)
      real(dp)             :: relPos(3)
      ! Compute distance to tip
      relPos = pos - EL_xyzPos
      relPos(3) = relPos(3) - EL_topZ
-     EL_around_electrode_tip = (norm2(relPos) < 0.25d0 * EL_Hcone)
-  end function EL_around_electrode_tip
+     EL_around_elec_tip = (norm2(relPos) < 0.25d0 * EL_Hcone)
+  end function EL_around_elec_tip
 
   subroutine EL_setWeightFactor(ix, factor)
     integer, intent(in) :: ix

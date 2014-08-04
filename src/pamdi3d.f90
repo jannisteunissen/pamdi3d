@@ -47,6 +47,8 @@ program pamdi3d
   
   logical  :: finished, flag_output, rescale, adapt_grid
   logical :: use_detach, use_photoion, do_fake_attach
+
+  real(dp) :: max_ev
   
   ! Gas / cross sec parameters
   real(dp)                       :: pressure, temperature
@@ -58,12 +60,11 @@ program pamdi3d
   real(dp) :: sim_time, end_time
   real(dp) :: time_per_output, time_per_grid_adapt
   real(dp) :: dt_fld, min_incr_rescale, prev_fld_time
-  real(dp) :: interp_err, fld_err
-  real(dp) :: max_fld_err, max_interp_err
+  real(dp) :: fld_err
+  real(dp) :: max_fld_err
   real(dp) :: n_elec_sum
   real(dp) :: dt_min, dt_max, dt, dt_next
-  real(dp) :: meanWeight
-  real(dp) :: test_a(3)
+  real(dp) :: mean_weight
 
   ! Particle binning
   real(dp) :: bin_args(2)
@@ -83,14 +84,15 @@ program pamdi3d
      call CFG_read_file(cfg, trim(cfg_name))
   end do
   
-  sim_name = CFG_get_string(cfg, "sim_name")
+  call CFG_get(cfg, "sim_name", sim_name)
   if (myrank == root) then
      call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
   end if
   
   ! Read in the crossection data from files
-  n_gas_comp = CFG_get_size(cfg, "gas_names")
-  if (n_gas_comp /= CFG_get_size(cfg, "gas_fractions")) then
+  call CFG_get_size(cfg, "gas_names", n_gas_comp)
+  call CFG_get_size(cfg, "gas_fractions", n)
+  if (n_gas_comp /= n) then
      print *, "gas_names and gas_fracs have unequal size"
      stop
   end if
@@ -98,39 +100,33 @@ program pamdi3d
   allocate(gas_names(n_gas_comp))
   allocate(gas_fracs(n_gas_comp))
   allocate(gas_files(n_gas_comp))
-  call CFG_get_array(cfg, "gas_names", gas_names)
-  call CFG_get_array(cfg, "gas_fractions", gas_fracs)
-  call CFG_get_array(cfg, "gas_files", gas_files)
-  call CFG_get_real(cfg, "gas_temperature", temperature)
-  call CFG_get_real(cfg, "gas_pressure", pressure)
+  call CFG_get(cfg, "gas_names", gas_names)
+  call CFG_get(cfg, "gas_fractions", gas_fracs)
+  call CFG_get(cfg, "gas_files", gas_files)
+  call CFG_get(cfg, "gas_temperature", temperature)
+  call CFG_get(cfg, "gas_pressure", pressure)
+  call CFG_get(cfg, "part_max_ev", max_ev)
   call GAS_initialize(gas_names, gas_fracs, pressure, temperature)
   
   print *, "Reading crossection data"
   do n = 1, n_gas_comp
-     print *, trim(gas_files(n))
-     print *, trim(gas_names(n))
-     print *, gas_fracs(n)
-     print *, GAS_get_number_dens()
-     ! call CS_add_from_file("input/" // gas_files(n), gas_names(n), 1.0_dp, &
-     !      gas_fracs(n) * GAS_get_number_dens(), &
-     !      CFG_get_real(cfg, "part_max_ev"), cross_secs)
+     call CS_add_from_file("input/" // gas_files(n), gas_names(n), 1.0_dp, &
+          gas_fracs(n) * GAS_get_number_dens(), max_ev, cross_secs)
   end do
 
   ! Initialize all modules that need initialization
-  call PD_set(CFG_get_ints(cfg, "grid_size") * CFG_get_real(cfg, "grid_delta"), &
-       CFG_get_int(cfg, "grid_size"), CFG_get_logic(cfg, "sim_use_electrode"))
+  call PD_set(cfg)
   print *, " ~~~ initializing electric fld module"
   call E_initialize(cfg)
   print *, " ~~~ initializing electrode module"
-  call EL_initialize(cfg, rng, PD_r_max, myrank, root)
+  if (PD_use_elec) call EL_initialize(cfg, rng, PD_r_max, myrank, root)
   
   print *, " ~~~ initializing particle module"
-  print *, "GET AN INT", CFG_get_int(cfg, "part_max_num")
-  call pc%initialize(UC_elec_mass, cross_secs, CFG_get_int(cfg, "part_lkp_tbl_size"), &
-       CFG_get_real(cfg, "part_max_ev"), CFG_get_int(cfg, "part_max_num"))
+  call PM_initialize(pc, cross_secs, cfg)
 
-  use_photoion = CFG_get_logic(cfg, "sim_use_photoionization")
-  use_detach = CFG_get_logic(cfg, "sim_use_detachment")
+  call CFG_get(cfg, "photoi_use", use_photoion)
+  call CFG_get(cfg, "sim_use_o2m_detach", use_detach)
+
   if (use_photoion .or. use_detach) then
      print *, " ~~~ initializing photoionization module"
      call MISC_initialize(cfg)
@@ -138,7 +134,7 @@ program pamdi3d
 
   if (myrank == root) then
      call system_clock(COUNT=WCTime_start)
-     print *, 'Setting up initial electron/ion positions and Efld'
+     print *, 'Setting up initial electron/ion positions and fld'
      call IC_set_init_cond(pc, cfg, rng)
   end if
 
@@ -169,7 +165,7 @@ program pamdi3d
      end do
   end if
 
-  if (myrank == root) call E_benchmark()
+  ! if (myrank == root) call E_benchmark()
 
   call E_update_grids(myrank, root, sim_time)
   call PM_particles_to_density(pc)
@@ -188,24 +184,21 @@ program pamdi3d
   n_grid_adapt        = 0
   step_cntr           = 0
   steps_left_fld      = 0
-  n_part_sum_prev     = PP_get_num_part(pc)
+  n_part_sum_prev     = PP_get_num_sim_part(pc)
 
   sim_time            = 0.0D0
   prev_fld_time       = 0.0D0
   max_fld_err         = 0.0D0
-  interp_err          = 0.0D0
   fld_err             = 0.0D0
 
-  n_part_rescale      = CFG_get_int(cfg, "part_n_rescale")
-  end_time            = CFG_get_real(cfg, "sim_end_time")
-  time_per_output     = CFG_get_real(cfg, "output_timestep")
-  time_per_grid_adapt = CFG_get_real(cfg, "ref_timePerAdaptation")
-  dt_min              = CFG_get_real(cfg, "sim_dt_min")
-  dt_max              = CFG_get_real(cfg, "sim_dt_max")
-  max_fld_err         = CFG_get_real(cfg, "sim_max_fld_err")
-  max_interp_err      = CFG_get_real(cfg, "sim_max_interp_err")
-  min_incr_rescale    = CFG_get_real(cfg, "sim_min_incr_rescale")
-  use_detach          = CFG_get_logic(cfg, "sim_use_O2Min_bg")
+  call CFG_get(cfg, "part_n_rescale", n_part_rescale)
+  call CFG_get(cfg, "sim_end_time", end_time)
+  call CFG_get(cfg, "output_timestep", time_per_output)
+  call CFG_get(cfg, "ref_time_per_adaptation", time_per_grid_adapt)
+  call CFG_get(cfg, "sim_dt_min", dt_min)
+  call CFG_get(cfg, "sim_dt_max", dt_max)
+  call CFG_get(cfg, "sim_max_fld_err", max_fld_err)
+  call CFG_get(cfg, "sim_min_incr_rescale", min_incr_rescale)
 
   bin_args(1) = 0
   bin_args(2) = 1/PD_dr(1)
@@ -215,8 +208,6 @@ program pamdi3d
   dt_fld              = dt_min
   do_fake_attach      = .true.
 
-  call E_benchmark()
-
   if (myrank == root) then
      print *, "Starting simulation with name ", trim(sim_name), ","
      print *, "will simulate up to ", 1.0e9_dp * end_time, "ns"
@@ -224,7 +215,7 @@ program pamdi3d
 
   ! Write the output
   n_output = 1
-  write(filename, "(A,I6,A)") "output/" // trim(sim_name) // "_", &
+  write(filename, "(A,I6.6,A)") "output/" // trim(sim_name) // "_", &
        n_output, ".silo"
   print *, trim(filename)
   call E_write_grids(filename, myrank, root, n_output, sim_time)
@@ -238,8 +229,8 @@ program pamdi3d
      call pc%advance(dt)
 
      if (steps_left_fld <= 0) then
-        n_part_sum = PP_get_num_part(pc)
-
+        n_part_sum = PP_get_num_sim_part(pc)
+        n_elec_sum = PP_get_num_real_part(pc)
         if (use_photoion) call MISC_photoionization(pc, rng, sim_time - prev_fld_time, myrank, root)
         if (use_detach) call MISC_detachment(pc, rng, sim_time - prev_fld_time, myrank, root)
 
@@ -279,9 +270,8 @@ program pamdi3d
         ! Write the output
         if (flag_output) then
            n_output = n_output + 1
-           write(filename, "(A,I6,A)") "output/" // trim(sim_name) // "_", &
+           write(filename, "(A,I6.6,A)") "output/" // trim(sim_name) // "_", &
                 n_output, ".silo"
-           print *, trim(filename)
            call E_write_grids(filename, myrank, root, n_output, sim_time)
         end if
 
@@ -306,17 +296,21 @@ program pamdi3d
 
            ! TODO: The above call modifies the electron density slightly,
            ! probably not very important but check it later.
-           call PP_reorder_by_bins_mpi(pc, PM_bin_func, n_bins, bin_args, myrank, ntasks)
+           call PP_reorder_by_bins_mpi(pc, PM_binner, myrank, ntasks)
 
            if (myrank == root) then
-              print *, step_cntr, "Rescaling particles, meanWeight:", meanWeight, "nParticles", n_part_sum
+              mean_weight = n_elec_sum / (n_part_sum + epsilon(1.0_dp))
+              print *, step_cntr, "Rescaling particles, mean_weight:", &
+                   mean_weight, "nParticles", n_part_sum
            end if
 
            call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.true.)
+           print *, "Adjusting weights"
            call PM_adjust_weights(pc)
+           print *, "Done adjusting weights"
 
-           n_part_sum_prev  = PP_get_num_part(pc)
-           n_part_sum             = n_part_sum_prev
+           n_part_sum_prev = n_part_sum
+           n_part_sum = PP_get_num_sim_part(pc)
 
            call PM_particles_to_density(pc)
            call E_compute_field(myrank, root, sim_time)
@@ -339,8 +333,6 @@ program pamdi3d
            write(*, FMT = "((A)(es10.2e2)(A),(I12),(A),(es10.2e2),(A),(es10.4e2))") "       WC t(s): ", &
                 & (WCTime_current - WCTime_start)/1.0D3, "   nPart:", n_part_sum, &
                 & "  nElec: ", n_elec_sum
-           ! print *, "InterpErr:", interp_err, "fld_err:", fld_err
-           ! print *, "maxPSerr:", maxPSerr
            ! write(*,*) ""
         end if
         prev_fld_time = sim_time
@@ -393,22 +385,21 @@ contains
          "The name of the simulation")
     call CFG_add(cfg, "sim_n_samples_efield", 1000, &
          "The number of samples to take to estimate the electric field error")
-    call CFG_add(cfg, "sim_max_efield_err", 1.0D-2, &
+    call CFG_add(cfg, "sim_max_fld_err", 5.0D-2, &
          "The maximum allowed error in the electric field before recomputing it")
     call CFG_add(cfg, "sim_max_electrons", 1.0d99, &
          "Stop the simulation when this many electrons are in the simulation")
-    CALL CFG_add(cfg, "sim_max_interp_err", 1.0D-2, &
-         & "The maximum allowed error in the acceleration of particles, before interpolating a new value from the Efield")
     CALL CFG_add(cfg, "sim_min_incr_rescale", 1.5_dp, &
          & "The minimum increase in number of particles before their weights are rescaled (superparticle creation)")
     CALL CFG_add(cfg, "sim_n_runs_max", 1, &
          & "The number of runs to perform for simulation types that require this")
-    call CFG_add(cfg, "sim_limitIonDens", 5.0D20, &
-         "The ion density (1/m^3) from which to start limiting the Efield")
     call CFG_add(cfg, "sim_efield_err_threshold", 1.0d-2, &
          "Error threshold for electric field grid refinement")
     call CFG_add(cfg, "sim_use_time_dep_rng", .false., &
          "Whether the RNG is initialized using the current time")
+    call CFG_add(cfg, "sim_use_o2m_detach", .false., &
+         "Whether we use background O2- in the simulation")
+
 
     call CFG_add(cfg, "ref_max_levels", 4, &
          "The maximum number of refinement levels in the electric field")
@@ -446,7 +437,7 @@ contains
          "A list of values of the electric field applied in the z-direction", dyn_size = .true.)
     CALL CFG_add(cfg, "sim_efield_times", (/0.0D0/), &
          "The times (in increasing order) at which the values of the applied electric field are used", dyn_size = .true.)
-    CALL CFG_add(cfg, "sim_constantEfield", .FALSE., &
+    CALL CFG_add(cfg, "sim_constant_efield", .false., &
          & "Whether the electric field is constant in space and time (no space charge effect)")
 
     ! Initial conditions
@@ -454,9 +445,9 @@ contains
          "The type of initial condition")
     call CFG_add(cfg, "init_seed_pos_radius", 1.0D-4, &
          "The radius of the distribution of initial ion seeds")
-    call CFG_add(cfg, "init_weight", 1, &
+    call CFG_add(cfg, "init_weight", 1.0_dp, &
          "The initial weight of electrons")
-    call CFG_add(cfg, "init_n_ion_pairs", 1.d2 , &
+    call CFG_add(cfg, "init_n_ion_pairs", 1.0d2, &
          "The number of initial ion pairs")
     call CFG_add(cfg, "init_line_dens", 1.d10 , &
          "The density for some types of initial conditions")
@@ -470,8 +461,6 @@ contains
          "The background ion/electron density in the domain")
     call CFG_add(cfg, "init_o2m_bg_dens", 0.0D0, &
          "The background O2- density in the domain")
-    call CFG_add(cfg, "sim_use_o2m_bg", .false., &
-         "Whether we use background O2- in the simulation")
 
     ! Poisson solver related parameters
     call CFG_add(cfg, "grid_size", (/33, 33, 33/), &
@@ -495,25 +484,27 @@ contains
          "The table size to use in the particle model for lookup tables")
     call CFG_add(cfg, "part_minMergeDens", 0.0d16, &
          "The minimum electron density to consider merging particles")
-    CALL CFG_add(cfg, "part_per_cell", 64, &
+    CALL CFG_add(cfg, "part_per_cell", 64.0_dp, &
          & "The minimum number of particles in a cell to consider rescaling them")
-    CALL CFG_add(cfg, "part_max_weight", 1000, &
+    CALL CFG_add(cfg, "part_max_weight", 1.0e3_dp, &
          & "Only particles with a weight < maxWeight will be rescaled")
-    CALL CFG_add(cfg, "part_max_merge_dist", 1.0d0, &
+    CALL CFG_add(cfg, "part_merge_max_distance", 1.0d0, &
+         & "Only particles closer together than this var * delta can be merged")
+    call CFG_add(cfg, "part_merge_coord_weights", (/1.0_dp, 1.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
          & "Only particles closer together than this var * delta can be merged")
 
     ! Photoionization parameters
-    call CFG_add(cfg, "Pi_enabled", .false., &
+    call CFG_add(cfg, "photoi_use", .false., &
          "Whether photoionization is used")
-    CALL CFG_add(cfg, "Pi_efield_table", (/ 0.0D0, 0.25D7, 0.4D7, 0.75D7, 1.5D7, 3.75D7/), &
+    CALL CFG_add(cfg, "photoi_efield_table", (/ 0.0D0, 0.25D7, 0.4D7, 0.75D7, 1.5D7, 3.75D7/), &
          & "The tabulated values of the electric field (for the photo-efficiency)")
-    CALL CFG_add(cfg, "pi_efficiency_table", (/0.05D0, 0.05D0, 0.12D0, 0.08D0, 0.06D0, 0.4D0/), &
+    CALL CFG_add(cfg, "photoi_efficiency_table", (/0.05D0, 0.05D0, 0.12D0, 0.08D0, 0.06D0, 0.4D0/), &
          & "The tabulated values of the the photo-efficiency")
-    CALL CFG_add(cfg, "Pi_frequencies", (/2.925D12, 3.059D12/), &
+    CALL CFG_add(cfg, "photoi_frequencies", (/2.925D12, 3.059D12/), &
          & "The lower/upper bound for the frequency of the photons, not currently used")
-    CALL CFG_add(cfg, "pi_absorp_inv_lengths", (/3.5D0 / UC_torr_to_bar, 200D0 / UC_torr_to_bar/), &
+    CALL CFG_add(cfg, "photoi_absorp_inv_lengths", (/3.5D0 / UC_torr_to_bar, 200D0 / UC_torr_to_bar/), &
          & "The inverse min/max absorption length, have to be scaled by oxygen partial pressure")
-    call CFG_add(cfg, "pi_mean_life_time_excited", 0.1d-10, &
+    call CFG_add(cfg, "photoi_mean_life_time_excited", 0.1d-10, &
          "The mean life time of excited species")
 
     ! Output parameters
@@ -542,7 +533,7 @@ contains
     call CFG_add(cfg, "elec_spacing", 2.0d-6, &
          "The distance between points on the electrode surface")
     CALL CFG_add(cfg, "elec_n_surface_points", 100, &
-         & "The number of points on the electrode surface that are used to create the CSM linear system of equations")
+         & "The number of points on the electrode surface")
     CALL CFG_add(cfg, "elec_surface_points_scale", 1.0D0, &
          & "The scale factor for the distribution of surface points on the electrode.")
     ! call CFG_sort(cfg)
