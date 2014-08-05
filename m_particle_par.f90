@@ -46,7 +46,7 @@ contains
     integer :: ierr, mean_n_part, i_min, i_max, tag
     integer, dimension(0:ntasks-1) :: n_part_task
 
-    print *, myrank, "Before sharing: pc%n_part", pc%n_part
+    ! print *, myrank, "Before sharing: pc%n_part", pc%n_part
     ! Get the number of particles each task has
     call MPI_ALLGATHER(pc%n_part, 1, MPI_integer, n_part_task, 1, &
          MPI_integer, MPI_COMM_WORLD, ierr)
@@ -90,7 +90,7 @@ contains
 
     call MPI_BARRIER(MPI_COMM_WORLD, ierr)
     pc%n_part = n_part_task(myrank)
-    print *, myrank, "After sharing: pc%n_part", pc%n_part
+    ! print *, myrank, "After sharing: pc%n_part", pc%n_part
   end subroutine PP_share_mpi
 
   ! Divide the particles over the tasks based on their bin index
@@ -98,21 +98,19 @@ contains
     use mpi
     use m_lookup_table
     use m_mrgrnk
-    use m_linked_list
     type(PC_t), intent(inout) :: pc
     class(PC_bin_t), intent(in) :: binner
     integer, intent(in) :: myrank, ntasks
-    integer :: ll, ix, rank, ierr, n_behind, n_part_interval, n_send
+    integer :: ll, ix, dst, ierr, n_behind, n_part_interval, n_send
     integer :: i_min, i_max
     integer :: tag, part_count
     integer :: n_sends, n_recvs, sender, recver, n_part_mean
     integer :: n_part_task(0:ntasks-1)
-    integer :: n_part_interval_task(0:ntasks-1, 0:ntasks-1)
-    integer :: split_ix(-1:ntasks)
+    integer :: n_part_dst_src(0:ntasks-1, 0:ntasks-1)
     integer, allocatable :: n_part_per_bin(:), ix_list(:)
     real(dp), allocatable :: bin_ixs(:)
 
-    print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
+    ! print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
 
     ! Get the number of particles each task has
     call MPI_ALLGATHER(pc%n_part, 1, MPI_integer, n_part_task, 1, &
@@ -136,22 +134,18 @@ contains
 
     ! Sort by bin_ixs
     call mrgrnk(bin_ixs, ix_list)
+    bin_ixs                   = bin_ixs(ix_list)
     pc%particles(1:pc%n_part) = pc%particles(ix_list)
 
-    ! Find the split_ix(:) s.t. task n will hold particles with ix >
-    ! split_ix(n-1) and ix <= split_ix(n)
-    split_ix(-1)              = 0
-    split_ix(ntasks)          = binner%n_bins
-    rank                      = 0
-    n_behind                  = 0
-    n_part_interval_task(:,:) = 0
-    n_part_interval           = 0
+    dst                 = 0
+    n_behind            = 0
+    n_part_dst_src(:,:) = 0
+    n_part_interval     = 0
 
     do ix = 1, binner%n_bins
        n_part_interval = n_part_interval + n_part_per_bin(ix)
 
        if (n_part_interval >= n_part_mean .or. ix == binner%n_bins) then
-          split_ix(rank)  = ix
           n_part_interval = 0
           part_count      = 0
 
@@ -160,16 +154,16 @@ contains
              part_count = part_count + 1
           end do
 
-          n_part_interval_task(rank, myrank) = part_count
-          n_behind                           = n_behind + part_count
-          rank                               = rank + 1
+          n_part_dst_src(dst, myrank) = part_count
+          n_behind = n_behind + part_count
+          dst = dst + 1
 
-          if (rank == ntasks) exit
+          if (dst == ntasks) exit ! dst runs from from 0 to ntasks-1
        end if
 
     end do
 
-    call MPI_ALLREDUCE(MPI_IN_PLACE, n_part_interval_task, ntasks*ntasks, &
+    call MPI_ALLREDUCE(MPI_IN_PLACE, n_part_dst_src, ntasks*ntasks, &
          MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
 
     ! Send particles to task that holds a region
@@ -180,7 +174,7 @@ contains
        if (myrank == recver) then ! Receive
           do sender = 0, ntasks - 1
              if (sender == myrank) cycle ! Skip ourselves
-             n_send = n_part_interval_task(recver, sender)
+             n_send = n_part_dst_src(recver, sender)
 
              if (n_send > 0) then
                 n_recvs   = n_recvs + 1
@@ -189,38 +183,36 @@ contains
                 i_max     = pc%n_part + n_send
                 pc%n_part = i_max
                 call pc%check_space(i_max)
-                print *, myrank, ": receives", n_send, "from", sender, "i_min", i_min
+                ! print *, myrank, ": receives", n_send, "from", sender, "i_min", i_min
                 call recv_parts_mpi(pc%particles(i_min:i_max), sender, tag)
              end if
           end do
        else ! Send
-          n_send = n_part_interval_task(recver, myrank)
+          n_send = n_part_dst_src(recver, myrank)
 
           if (n_send > 0) then
              n_sends = n_sends + 1
              tag     = myrank
 
              ! Find index of first particle to send
-             i_min    = sum(n_part_interval_task(0:recver-1, myrank)) + 1
+             i_min    = sum(n_part_dst_src(0:recver-1, myrank)) + 1
              i_max = i_min + n_send - 1
 
-             print *, myrank, ": sends", n_send, "to", recver, "i_min", i_min
+             ! print *, myrank, ": sends", n_send, "to", recver, "i_min", i_min
              call send_parts_mpi(pc%particles(i_min:i_max), recver, tag)
 
              ! Mark the particles that we have send away as inactive
              do ll = i_min, i_max
-                call LL_add(pc%clean_list, ll)
+                call pc%remove_part(ll)
              end do
 
           end if
        end if
     end do
 
-    call MPI_BARRIER(MPI_COMM_WORLD, ierr)
-    print *, "After divide ", myrank, " has ", pc%n_part, "pc%n_part (some dead)"
+    ! print *, "After divide ", myrank, " has ", pc%n_part, "pc%n_part (some dead)"
     call pc%clean_up()
     print *, "After divide ", myrank, " has ", pc%n_part, " particles"
-
   end subroutine PP_reorder_by_bins_mpi
 
   subroutine send_parts_mpi(parts, recver, tag)

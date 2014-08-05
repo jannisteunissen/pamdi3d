@@ -488,7 +488,7 @@ contains
 
   subroutine clean_up(self)
     class(PC_t), intent(inout) :: self
-    integer :: ix_end, ix_clean, n_part_prev
+    integer :: ix_end, ix_clean, n_part
     logical :: success
 
     do
@@ -496,13 +496,15 @@ contains
        call LL_pop(self%clean_list, ix_clean, success)
        if (.not. success) exit
 
+       n_part      = self%n_part
+       ! This is overridden if a replacement is found
+       self%n_part = min(self%n_part, ix_clean-1)
+
        ! Find the last "alive" particle in the list
-       n_part_prev = self%n_part
-       self%n_part = ix_clean-1 ! This is overridden if a replacement is found
-       do ix_end = n_part_prev, ix_clean+1, -1
+       do ix_end = n_part, ix_clean+1, -1
           if (self%particles(ix_end)%w /= PC_dead_weight) then
              self%particles(ix_clean) = self%particles(ix_end)
-             self%n_part = ix_end-1
+             self%n_part              = ix_end-1
              exit
           end if
        end do
@@ -942,7 +944,6 @@ contains
 
     print *, "clean up"
     call self%clean_up()
-    print *, "done"
   end subroutine merge_and_split
 
   ! Merge two particles into part_a, should remove part_b afterwards
@@ -952,11 +953,15 @@ contains
     type(RNG_t), intent(inout) :: rng
 
     if (rng%uni_01() > part_a%w / (part_a%w + part_b%w)) then
-       part_out%v      = part_b%v
        part_out%x      = part_b%x
+       part_out%v      = part_b%v
+       part_out%a      = part_b%a
+       part_out%t_left = part_b%t_left
     else
-       part_out%v      = part_a%v
        part_out%x      = part_a%x
+       part_out%v      = part_a%v
+       part_out%a      = part_a%a
+       part_out%t_left = part_a%t_left
     end if
     part_out%w = part_a%w + part_b%w
   end subroutine PC_merge_part_rxv
@@ -1079,7 +1084,6 @@ contains
 
   subroutine PC_reorder_by_bins(pcs, binner)
     use m_mrgrnk
-    use m_linked_list
     type(PC_t), intent(inout) :: pcs(:)
     class(PC_bin_t), intent(in) :: binner
     integer, allocatable :: bin_counts(:,:)
@@ -1138,14 +1142,13 @@ contains
              new_loc = pcs(io)%n_part + 1
              pcs(io)%particles(new_loc) = pcs(ip)%particles(ll)
              pcs(io)%n_part = new_loc
-             call LL_add(pcs(ip)%clean_list, ll)
+             call remove_part(pcs(ip), ll)
           end if
        end do
     end do
 
     do ip = 1, n_pc
        call pcs(ip)%clean_up()
-       print *, "REMOVECHECK", ip, pcs(ip)%n_part
     end do
   end subroutine PC_reorder_by_bins
 
