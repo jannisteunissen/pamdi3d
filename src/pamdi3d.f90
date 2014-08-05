@@ -35,21 +35,21 @@ program pamdi3d
   integer, parameter :: dp = kind(0.0d0)
   character(LEN=80) :: sim_name, cfg_name, filename
 
-  integer :: n
-  integer :: n_fld_samples
-  integer :: n_gas_comp
+  integer  :: n
+  integer  :: n_samples
+  integer  :: n_gas_comp
   integer  :: step_cntr, steps_left_fld
   integer  :: n_output, n_grid_adapt
   integer  :: WCTime_start, WCTime_current
   integer  :: n_part_rescale
   integer  :: n_part_sum, n_part_sum_prev
   integer  :: ierr, myrank, ntasks, root = 0, ix, n_its
-  
+
   logical  :: finished, flag_output, rescale, adapt_grid
-  logical :: use_detach, use_photoion, do_fake_attach
+  logical  :: use_detach, use_photoion, do_fake_attach
 
   real(dp) :: max_ev
-  
+
   ! Gas / cross sec parameters
   real(dp)                       :: pressure, temperature
   real(dp), allocatable          :: gas_fracs(:)
@@ -65,6 +65,7 @@ program pamdi3d
   real(dp) :: n_elec_sum
   real(dp) :: dt_min, dt_max, dt, dt_next
   real(dp) :: mean_weight
+  real(dp) :: cfl_num
 
   ! Particle binning
   real(dp) :: bin_args(2)
@@ -83,12 +84,12 @@ program pamdi3d
      call get_command_argument(ix, cfg_name)
      call CFG_read_file(cfg, trim(cfg_name))
   end do
-  
+
   call CFG_get(cfg, "sim_name", sim_name)
   if (myrank == root) then
      call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
   end if
-  
+
   ! Read in the crossection data from files
   call CFG_get_size(cfg, "gas_names", n_gas_comp)
   call CFG_get_size(cfg, "gas_fractions", n)
@@ -107,7 +108,7 @@ program pamdi3d
   call CFG_get(cfg, "gas_pressure", pressure)
   call CFG_get(cfg, "part_max_ev", max_ev)
   call GAS_initialize(gas_names, gas_fracs, pressure, temperature)
-  
+
   print *, "Reading crossection data"
   do n = 1, n_gas_comp
      call CS_add_from_file("input/" // gas_files(n), gas_names(n), 1.0_dp, &
@@ -120,7 +121,7 @@ program pamdi3d
   call E_initialize(cfg)
   print *, " ~~~ initializing electrode module"
   if (PD_use_elec) call EL_initialize(cfg, rng, PD_r_max, myrank, root)
-  
+
   print *, " ~~~ initializing particle module"
   call PM_initialize(pc, cross_secs, cfg)
 
@@ -192,6 +193,8 @@ program pamdi3d
   fld_err             = 0.0D0
 
   call CFG_get(cfg, "part_n_rescale", n_part_rescale)
+  call CFG_get(cfg, "part_n_samples", n_samples)
+  call CFG_get(cfg, "sim_cfl_num", cfl_num)
   call CFG_get(cfg, "sim_end_time", end_time)
   call CFG_get(cfg, "output_timestep", time_per_output)
   call CFG_get(cfg, "ref_time_per_adaptation", time_per_grid_adapt)
@@ -231,37 +234,42 @@ program pamdi3d
      if (steps_left_fld <= 0) then
         n_part_sum = PP_get_num_sim_part(pc)
         n_elec_sum = PP_get_num_real_part(pc)
-        if (use_photoion) call MISC_photoionization(pc, rng, sim_time - prev_fld_time, myrank, root)
-        if (use_detach) call MISC_detachment(pc, rng, sim_time - prev_fld_time, myrank, root)
+        if (use_photoion) call MISC_photoionization(pc, rng, &
+             sim_time - prev_fld_time, myrank, root)
+        if (use_detach) call MISC_detachment(pc, rng, &
+             sim_time - prev_fld_time, myrank, root)
 
         call PM_particles_to_density(pc)
-        call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.true.)
+        call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.true.)
         call E_compute_field(myrank, root, sim_time)
-        call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.false.)
+        call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.false.)
+        print *, "Field error", fld_err
         call pc%set_accel(E_get_accel_part)
 
         ! Redistribute the particles
         call PP_share_mpi(pc, myrank, ntasks)
 
-        dt_next = PM_get_max_dt(pc, myrank, root)
+        dt_next = PM_get_max_dt(pc, rng, n_samples, cfl_num)
 
         if (myrank == root) then
            dt_fld         = get_new_dt(dt_fld, fld_err, max_fld_err)
            dt_next        = min(dt_next, dt_fld)
            steps_left_fld = floor(dt_fld / dt_next)
 
-           ! Centralize these flags because they might differ on heterogeneous systems
-           finished          = sim_time > end_time
-           flag_output        = n_output <= sim_time / time_per_output .or. finished
-           rescale           = n_part_sum > n_part_rescale .and. &
+           ! Centralize these flags because for heterogeneous systems
+           finished    = sim_time > end_time
+           flag_output = n_output <= sim_time / time_per_output .or. finished
+           rescale     = n_part_sum > n_part_rescale .and. &
                 n_part_sum > int(n_part_sum_prev * min_incr_rescale)
-           rescale           = rescale .or. step_cntr == 1
-           adapt_grid        = n_grid_adapt <= sim_time / time_per_grid_adapt
+           rescale     = rescale .or. step_cntr == 1
+           adapt_grid  = n_grid_adapt <= sim_time / time_per_grid_adapt
         end if
 
         ! Communicate the new step sizes and flags
-        call MPI_BCAST(dt_next, 1, MPI_DOUBLE_PRECISION, root, MPI_COMM_WORLD, ierr)
-        call MPI_BCAST(steps_left_fld, 1, MPI_INTEGER, root, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(dt_next, 1, MPI_DOUBLE_PRECISION, &
+             root, MPI_COMM_WORLD, ierr)
+        call MPI_BCAST(steps_left_fld, 1, MPI_INTEGER, &
+             root, MPI_COMM_WORLD, ierr)
         call MPI_BCAST(flag_output, 1, MPI_LOGICAL, root, MPI_COMM_WORLD, ierr)
         call MPI_BCAST(adapt_grid,  1, MPI_LOGICAL, root, MPI_COMM_WORLD, ierr)
         call MPI_BCAST(finished,   1, MPI_LOGICAL, root, MPI_COMM_WORLD, ierr)
@@ -288,10 +296,10 @@ program pamdi3d
         if (adapt_grid .or. rescale) then
            call E_share_vars((/E_i_elec/), root)
 
-           print *, "TODO"
+           print *, "TODO fake attachments?"
            ! if (do_fake_attach) then
            !    if (myrank == root) print *, "Performing fake attachments!"
-           !    call PM_convertElecForStability(dt_fld, 0.2d0) ! Second arg is max mobility estimate
+           !    call PM_convertElecForStability(dt_fld, 0.2d0)
            ! end if
 
            ! TODO: The above call modifies the electron density slightly,
@@ -304,7 +312,7 @@ program pamdi3d
                    mean_weight, "nParticles", n_part_sum
            end if
 
-           call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.true.)
+           call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.true.)
            print *, "Adjusting weights"
            call PM_adjust_weights(pc)
            print *, "Done adjusting weights"
@@ -314,7 +322,7 @@ program pamdi3d
 
            call PM_particles_to_density(pc)
            call E_compute_field(myrank, root, sim_time)
-           call PM_fld_error(pc, rng, n_fld_samples, fld_err, only_store=.false.)
+           call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.false.)
 
            if (myrank == root) then
               print *, "Fld error due to rescaling:", fld_err
@@ -328,12 +336,13 @@ program pamdi3d
 
         if (myrank == root) then
            call system_clock(COUNT=WCTime_current)
-           write(*, FMT = "((I7),(A),(es10.4e2),(A),(es10.2e2),(A),(es10.2e2))") n_output, &
-                & "   t(s): ", sim_time, "   dt: ", dt_next, "   dtPS", dt_fld
-           write(*, FMT = "((A)(es10.2e2)(A),(I12),(A),(es10.2e2),(A),(es10.4e2))") "       WC t(s): ", &
+           write(*, FMT = "((I7),(A),(es10.4e2),(A),(es10.2e2),(A),(es10.2e2))") &
+                n_output, "   t(s): ", sim_time, "   dt: ", dt_next, &
+                "   dtPS", dt_fld
+           write(*, FMT = "((A)(es10.2e2)(A),(I12),(A),(es10.2e2),(A),(es10.4e2))") &
+                "       WC t(s): ", &
                 & (WCTime_current - WCTime_start)/1.0D3, "   nPart:", n_part_sum, &
                 & "  nElec: ", n_elec_sum
-           ! write(*,*) ""
         end if
         prev_fld_time = sim_time
      end if
@@ -346,15 +355,16 @@ program pamdi3d
 
 contains
 
-  !> Given the old stepsize 'oldDt', the error 'err', the maximum allowed error 'maxErr',
-  !! and the relative change in number of particles, return a new stepsize.
+  ! Given the old stepsize 'oldDt', the error 'err', the maximum allowed error
+  ! 'maxErr', and the relative change in number of particles, return a new
+  ! stepsize.
   real(dp) function get_new_dt(oldDt, err, maxErr)
-    real(dp), intent(IN) :: oldDt       ! The old timestep
-    real(dp), intent(IN) :: err, maxErr  ! The actual error and the maximum / prev. error
+    real(dp), intent(IN) :: oldDt
+    real(dp), intent(IN) :: err, maxErr
 
     print *, "err", err
-    ! Adjust the timesteps to obtain an error close to the desired one.
-    ! The interpolation error should be ~ interp_errFrac * max_fld_err
+    ! Adjust the timesteps to obtain an error close to the desired one. The
+    ! interpolation error should be ~ interp_errFrac * max_fld_err
     if (err < 0.5D0 * maxErr) then
        get_new_dt = min(oldDt * (maxErr/(err+epsilon(err)))**0.1D0, 2.0D0 * oldDt)
     else if (err > maxErr) then
@@ -383,8 +393,6 @@ contains
          "Whether to use an electrode in the simulation")
     call CFG_add(cfg, "sim_name", "mcstr", &
          "The name of the simulation")
-    call CFG_add(cfg, "sim_n_samples_efield", 1000, &
-         "The number of samples to take to estimate the electric field error")
     call CFG_add(cfg, "sim_max_fld_err", 5.0D-2, &
          "The maximum allowed error in the electric field before recomputing it")
     call CFG_add(cfg, "sim_max_electrons", 1.0d99, &
@@ -393,15 +401,14 @@ contains
          & "The minimum increase in number of particles before their weights are rescaled (superparticle creation)")
     CALL CFG_add(cfg, "sim_n_runs_max", 1, &
          & "The number of runs to perform for simulation types that require this")
-    call CFG_add(cfg, "sim_efield_err_threshold", 1.0d-2, &
-         "Error threshold for electric field grid refinement")
     call CFG_add(cfg, "sim_use_time_dep_rng", .false., &
          "Whether the RNG is initialized using the current time")
     call CFG_add(cfg, "sim_use_o2m_detach", .false., &
          "Whether we use background O2- in the simulation")
+    call CFG_add(cfg, "sim_cfl_num", 0.25_dp, &
+         "CFL number used for the particles")
 
-
-    call CFG_add(cfg, "ref_max_levels", 4, &
+    call CFG_add(cfg, "ref_max_levels", 7, &
          "The maximum number of refinement levels in the electric field")
     call CFG_add(cfg, "ref_min_lvl_electrode", 3, &
          "The minimum refinement lvl around the electrode tip")
@@ -433,7 +440,7 @@ contains
          & "The partial pressure of the gases (as if they were ideal gases)", dyn_size = .true.)
 
     ! Electric field parameters
-    CALL CFG_add(cfg, "sim_efield_values", (/-1.0D7/), &
+    CALL CFG_add(cfg, "sim_efield_values", (/-7.0D6/), &
          "A list of values of the electric field applied in the z-direction", dyn_size = .true.)
     CALL CFG_add(cfg, "sim_efield_times", (/0.0D0/), &
          "The times (in increasing order) at which the values of the applied electric field are used", dyn_size = .true.)
@@ -441,7 +448,7 @@ contains
          & "Whether the electric field is constant in space and time (no space charge effect)")
 
     ! Initial conditions
-    call CFG_add(cfg, "init_cond_type", "seed", &
+    call CFG_add(cfg, "init_cond_type", "Gaussian", &
          "The type of initial condition")
     call CFG_add(cfg, "init_seed_pos_radius", 1.0D-4, &
          "The radius of the distribution of initial ion seeds")
@@ -462,10 +469,10 @@ contains
     call CFG_add(cfg, "init_o2m_bg_dens", 0.0D0, &
          "The background O2- density in the domain")
 
-    ! Poisson solver related parameters
+    ! Grid related parameters
     call CFG_add(cfg, "grid_size", (/33, 33, 33/), &
          "The number of grid cells in each direction")
-    call CFG_add(cfg, "grid_delta", (/5.0e-6_dp, 5.0e-6_dp, 5.0e-6_dp/), &
+    call CFG_add(cfg, "grid_delta", (/5.0e-4_dp, 5.0e-4_dp, 5.0e-4_dp/), &
          "The length of a grid cell in each direction")
     call CFG_add(cfg, "grid_plasma_min_rel_pos", (/0.0d0, 0.0d0, 0.0d0/), &
          "Plasma can only be above these relative coords")
@@ -476,6 +483,8 @@ contains
     ! Particle model related parameters
     call CFG_add(cfg, "part_max_num", 5000*1000, &
          "The maximum number of particles allowed per task")
+    call CFG_add(cfg, "part_n_samples", 1000, &
+         "The number of samples to use (for estimates)")
     call CFG_add(cfg, "part_n_rescale", 1000*1000, &
          "The number of particles at which to start rescaling")
     call CFG_add(cfg, "part_max_ev", 1000.0D0, &
@@ -536,7 +545,7 @@ contains
          & "The number of points on the electrode surface")
     CALL CFG_add(cfg, "elec_surface_points_scale", 1.0D0, &
          & "The scale factor for the distribution of surface points on the electrode.")
-    ! call CFG_sort(cfg)
+    call CFG_sort(cfg)
     print *, "Created configuration"
   end subroutine create_config
 

@@ -72,6 +72,7 @@ module m_efield_amr
    public :: E_get_field
    public :: E_get_accel_part
    public :: E_get_dr
+   public :: E_get_smallest_dr
    public :: E_get_max_of_vars
    public :: E_collect_mpi
    public :: E_loop_over_grids
@@ -104,7 +105,7 @@ contains
       call CFG_get(cfg, "elec_bc_type", E_bc_type)
       call CFG_get_size(cfg, "ref_delta_values", dyn_size)
       call CFG_get_size(cfg, "ref_max_efield_at_delta", ref_size)
-      
+
       if (dyn_size /= ref_size) then
          print *, "ref_efield_values and ref_delta_values have unequal size"
          stop
@@ -345,7 +346,6 @@ contains
       call mpi_collect_recursive(root_grid, (/E_i_elec, E_i_pion, E_i_nion, E_i_O2m/), myrank, root)
 
       if (myrank == root) then
-         print *, "Computing field"
          call set_source_term_recursive(root_grid)
 
          ! Add the electrode charges based on the old potential
@@ -366,7 +366,6 @@ contains
          call compute_field_recursive(root_grid)
 
          if (PD_use_elec) call check_elec_voltage(time, E_prev_max_diff)
-         print *, "Field has been computed"
       end if
 
       call E_share_vars((/E_i_Ex, E_i_Ey, E_i_Ez/), root)
@@ -404,8 +403,6 @@ contains
       Nx = amr_grid%Nr(1)
       Ny = amr_grid%Nr(2)
       Nz = amr_grid%Nr(3)
-
-      print *, amr_grid%lvl, "Computing potential", Nx, Ny, Nz
 
       req_workspace = 30 + Nx + Ny + 5*Nz + max(Nx, Ny, Nz) + 7*(Nx/2 + Ny/2)
 
@@ -506,7 +503,7 @@ contains
      use m_random
      type(PC_t), intent(inout) :: pc
      type(RNG_t), intent(inout) :: rng
-            
+
       interface
          subroutine func_p(pc, rng, ag)
             import
@@ -531,7 +528,7 @@ contains
       real(dp), intent(in)      :: time
       type(amr_grid_t), pointer :: new_grid
 
-      print *, myrank, "updating grids"
+      ! print *, myrank, "updating grids"
       call mpi_collect_recursive(root_grid, (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_exc/), myrank, root)
 
       if (myrank == root) then
@@ -624,7 +621,8 @@ contains
                end if
 
                if (.not. found_grid) then
-                  old_grid => get_grid_at_maxlvl(root_grid, xyz, amr_grid%lvl)
+                  old_grid => root_grid
+                  call get_grid_at_maxlvl(old_grid, xyz, amr_grid%lvl)
                   if (old_grid%lvl == amr_grid%lvl) then
                      found_grid = .true.
                      ix_offset = nint((amr_grid%r_min - old_grid%r_min) * amr_grid%inv_dr)
@@ -640,6 +638,8 @@ contains
             end do
          end do
       end do
+
+      nullify(old_grid)
 
       ! By default set child region to 0 (which means no children)
       amr_grid%child_ix = 0
@@ -923,59 +923,48 @@ contains
       end do
    end subroutine set_bc_from_parent
 
-   function get_grid_at(amr_grid, xyz) result(grid_ptr)
-      type(amr_grid_t), intent(in), target :: amr_grid
-      real(dp), intent(in)                 :: xyz(3)
-      type(amr_grid_t), pointer            :: grid_ptr
-      integer                              :: child_ix
+   subroutine get_grid_at(grid_ptr, xyz)
+     real(dp), intent(in)                     :: xyz(3)
+     type(amr_grid_t), intent(inout), pointer :: grid_ptr
+     integer                                  :: child_ix
+     do
+        child_ix = get_child_ix_at_xyz(grid_ptr, xyz)
+        if (child_ix == 0) exit
+        grid_ptr => grid_ptr%children(child_ix)
+     end do
+   end subroutine get_grid_at
 
-      grid_ptr => amr_grid
-      do
-         child_ix = get_child_ix_at_xyz(grid_ptr, xyz)
-         if (child_ix > 0) then
-            grid_ptr => grid_ptr%children(child_ix)
-         else
-            exit
-         end if
-      end do
-   end function get_grid_at
-
-   function get_grid_at_maxlvl(amr_grid, xyz, maxlvl) result(grid_ptr)
-      type(amr_grid_t), intent(in), target :: amr_grid
-      real(dp), intent(in)                 :: xyz(3)
-      integer, intent(in)                  :: maxlvl
-      type(amr_grid_t), pointer            :: grid_ptr
-      integer                              :: child_ix
-
-      grid_ptr => amr_grid
-      do
-         if (grid_ptr%lvl == maxlvl) exit
-         child_ix = get_child_ix_at_xyz(grid_ptr, xyz)
-         if (child_ix > 0) then
-            grid_ptr => grid_ptr%children(child_ix)
-         else
-            exit
-         end if
-      end do
-   end function get_grid_at_maxlvl
+   subroutine get_grid_at_maxlvl(grid_ptr, xyz, maxlvl)
+     real(dp), intent(in)                     :: xyz(3)
+     type(amr_grid_t), intent(inout), pointer :: grid_ptr
+     integer, intent(in)                      :: maxlvl
+     integer                                  :: child_ix
+     do
+        child_ix = get_child_ix_at_xyz(grid_ptr, xyz)
+        if (child_ix == 0 .or. grid_ptr%lvl == maxlvl) exit
+        grid_ptr => grid_ptr%children(child_ix)
+     end do
+   end subroutine get_grid_at_maxlvl
 
    function get_vars(amr_grid, v_ixs, xyz) result(vars)
-      type(amr_grid_t), intent(in)     :: amr_grid
-      integer, intent(in)              :: v_ixs(:)
-      real(dp), intent(in)             :: xyz(3)
-      real(dp), dimension(size(v_ixs)) :: vars
-      type(amr_grid_t), pointer        :: grid_ptr
-      grid_ptr => get_grid_at(amr_grid, xyz)
-      vars = get_vars_at_grid(grid_ptr, v_ixs, xyz)
+     type(amr_grid_t), intent(in), target :: amr_grid
+     integer, intent(in)                  :: v_ixs(:)
+     real(dp), intent(in)                 :: xyz(3)
+     real(dp), dimension(size(v_ixs))     :: vars
+     type(amr_grid_t), pointer            :: grid_ptr
+     grid_ptr => amr_grid
+     call get_grid_at(grid_ptr, xyz)
+     vars = get_vars_at_grid(grid_ptr, v_ixs, xyz)
    end function get_vars
 
    function get_vars_x_dr(amr_grid, v_ixs, xyz) result(vars)
-      type(amr_grid_t), intent(in)     :: amr_grid
-      integer, intent(in)              :: v_ixs(:)
-      real(dp), intent(in)             :: xyz(3)
-      real(dp), dimension(size(v_ixs)) :: vars
-      type(amr_grid_t), pointer        :: grid_ptr
-      grid_ptr => get_grid_at(amr_grid, xyz)
+     type(amr_grid_t), intent(in), target :: amr_grid
+     integer, intent(in)                  :: v_ixs(:)
+     real(dp), intent(in)                 :: xyz(3)
+     real(dp), dimension(size(v_ixs))     :: vars
+     type(amr_grid_t), pointer            :: grid_ptr
+      grid_ptr => amr_grid
+      call get_grid_at(grid_ptr, xyz)
       vars = get_vars_at_grid(grid_ptr, v_ixs, xyz) * product(grid_ptr%dr)
    end function get_vars_x_dr
 
@@ -1054,13 +1043,27 @@ contains
       dr = get_dr_recursive(root_grid, xyz)
    end function E_get_dr
 
+   function E_get_smallest_dr() result(dr)
+     real(dp)                      :: dr(3)
+     type(amr_grid_p), allocatable :: grid_list(:)
+     integer                       :: n
+
+     dr(:) = huge(1.0_dp)
+     call create_grid_list(root_grid, grid_list)
+
+     do n = 1, size(grid_list)
+        where (grid_list(n)%ptr%dr < dr) dr = grid_list(n)%ptr%dr
+     end do
+   end function E_get_smallest_dr
+
    recursive function get_dr_recursive(amr_grid, xyz) result(dr)
-      type(amr_grid_t), intent(in) :: amr_grid
-      real(dp), intent(in)         :: xyz(3)
-      real(dp)                     :: dr(3)
-      type(amr_grid_t), pointer    :: grid_ptr
-      grid_ptr => get_grid_at(amr_grid, xyz)
-      dr       = grid_ptr%dr
+     type(amr_grid_t), intent(in), target :: amr_grid
+     real(dp), intent(in)                 :: xyz(3)
+     real(dp)                             :: dr(3)
+     type(amr_grid_t), pointer            :: grid_ptr
+     grid_ptr => amr_grid
+     call get_grid_at(grid_ptr, xyz)
+     dr       = grid_ptr%dr
    end function get_dr_recursive
 
    function get_vars_at_grid(amr_grid, v_ixs, xyz) result(vars)

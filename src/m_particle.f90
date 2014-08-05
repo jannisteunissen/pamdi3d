@@ -16,7 +16,7 @@ module m_particle
        type(PC_part_t), intent(in) :: my_part
      end function p_to_int
   end interface
-  
+
   type, extends(PC_bin_t) :: bin_t
      real(dp) :: x_min
      real(dp) :: inv_dx
@@ -61,8 +61,8 @@ contains
     call pc%set_coll_callback(coll_callback)
     call pc%set_outside_check(outside_check)
 
-    PM_binner%n_bins = PD_size(1)
-    PM_binner%inv_dx = 1/PD_dr(1)
+    PM_binner%n_bins = 1000
+    PM_binner%inv_dx = (PM_binner%n_bins-1) / PD_r_max(1)
   end subroutine PM_initialize
 
   subroutine coll_callback(my_part, c_ix, c_type)
@@ -126,7 +126,7 @@ contains
     logical, intent(in) :: only_store
 
     integer :: i, n
-    real(dp) :: fld(3)
+    real(dp) :: fld(3), fld_sum
     real(dp), allocatable, save :: pos_samples(:, :)
     real(dp), allocatable, save :: fld_samples(:, :)
 
@@ -144,15 +144,18 @@ contains
 
        do i = 1, n_samples
           ! Randomly select a particle
-          n = int(rng%uni_01() * pc%n_part) + 1
+          n = rng%int_ab(1, pc%n_part)
           pos_samples(:,i) = pc%particles(n)%x
           fld_samples(:,i) = E_get_field(pos_samples(:,i))
        end do
     else
-       do i = 1, size(pos_samples, 2)
+       fld_sum = 0
+       do i = 1, n_samples
           fld = E_get_field(pos_samples(:,i))
-          fld_err  = max(fld_err, norm2(fld - fld_samples(:,i)))
+          fld_err = max(fld_err, norm2(fld - fld_samples(:,i)))
+          fld_sum = fld_sum + norm2(fld)
        end do
+       fld_err = fld_err * n_samples / fld_sum
     end if
   end subroutine PM_fld_error
 
@@ -168,23 +171,50 @@ contains
     end do
   end subroutine PM_particles_to_density
 
-  function PM_get_max_dt(pc, myrank, root) result(dt_max)
+  function PM_get_max_dt(pc, rng, n_samples, cfl_num) result(dt_max)
+    use m_random
+    use m_efield_amr
+    use mpi
+    use m_mrgrnk
     type(PC_t), intent(in) :: pc
-    integer, intent(in) :: myrank, root
+    type(RNG_t), intent(inout) :: rng
+    integer, intent(in) :: n_samples
+    real(dp), intent(in) :: cfl_num
     real(dp) :: dt_max
-    ! Do something with cfl..
-    print *, "TODO CFL"
-    dt_max = 1.0e-12_dp
+
+    real(dp) :: vel_est, min_dr
+    real(dp), allocatable :: velocities(:)
+    integer, allocatable :: ix_list(:)
+    integer :: n, ix, ierr
+
+    allocate(velocities(n_samples))
+    allocate(ix_list(n_samples))
+
+    ! Estimate maximum velocity of particles
+    do n = 1, n_samples
+       ix = rng%int_ab(1, pc%n_part)
+       velocities(n) = norm2(pc%particles(ix)%v)
+    end do
+
+    call mrgrnk(velocities, ix_list)
+    velocities = velocities(ix_list)
+
+    vel_est = velocities(nint(n_samples * 0.9_dp))
+
+    ! Get smallest grid delta
+    min_dr = minval(E_get_smallest_dr())
+
+    dt_max = cfl_num * min_dr / vel_est
+    call MPI_ALLREDUCE(MPI_IN_PLACE, dt_max, 1, MPI_DOUBLE_PRECISION, &
+         MPI_MAX, MPI_COMM_WORLD, ierr)
   end function PM_get_max_dt
 
   function PM_bin_func(binner, my_part) result(i_bin)
-    class(bin_t), intent(in)     :: binner
+    class(bin_t), intent(in)    :: binner
     type(PC_part_t), intent(in) :: my_part
-
     integer                     :: i_bin
-    real(dp)                    :: x, x_min, inv_dx
-    x      = my_part%x(1)
-    i_bin  = 1 + int((x - binner%x_min) * binner%inv_dx)
+
+    i_bin  = 1 + int((my_part%x(1) - binner%x_min) * binner%inv_dx)
     i_bin  = max(1, i_bin)
     i_bin  = min(binner%n_bins, i_bin)
   end function PM_bin_func

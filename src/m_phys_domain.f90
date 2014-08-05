@@ -18,7 +18,7 @@ contains
     call CFG_get(cfg, "grid_size", PD_size)
     call CFG_get(cfg, "grid_delta", PD_dr)
     call CFG_get(cfg, "sim_use_electrode", PD_use_elec)
-    PD_r_max = PD_size * PD_dr
+    PD_r_max = (PD_size-1) * PD_dr
   end subroutine PD_set
 
   ! Checks whether pos is outside the computational domain or inside the
