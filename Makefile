@@ -1,5 +1,5 @@
 FC 	:= mpif90
-FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -fcheck=all -g -O2 -fopenmp
+FFLAGS	:= -Wall -O2 -fopenmp #-ffpe-trap=invalid,zero,overflow -fcheck=all -g
 OBJS	:= m_gas.o m_particle_core.o m_particle_par.o m_cross_sec.o kdtree2.o
 
 INCDIRS	:= ../fosito

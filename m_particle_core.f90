@@ -52,7 +52,7 @@ module m_particle_core
      integer                      :: separator(100)  ! Separate rng data
 
      procedure(p_to_logic_f), pointer, nopass :: outside_check => null()
-     procedure(coll_callback_p), pointer, nopass :: coll_callback => null()
+     procedure(coll_callback_p), pointer      :: coll_callback => null()
 
    contains
      procedure, non_overridable :: initialize
@@ -98,10 +98,11 @@ module m_particle_core
   end type PC_bin_t
 
   abstract interface
-     subroutine coll_callback_p(my_part, c_ix, c_type)
+     subroutine coll_callback_p(self, my_part, c_ix, c_type)
        import
+       class(PC_t), intent(inout)  :: self
        type(PC_part_t), intent(in) :: my_part
-       integer, intent(in) :: c_ix, c_type
+       integer, intent(in)         :: c_ix, c_type
      end subroutine coll_callback_p
 
      subroutine p_to_r3_p(my_part, my_vec)
@@ -932,7 +933,7 @@ contains
 
     ! Split particles. These are at the end of part_copy
     num_split = count(weight_ratios >= large_ratio)
-    print *, "num_split:", num_split
+    ! print *, "num_split:", num_split
 
     do ix = num_part - num_split + 1, num_part
        ! Change part_copy(ix), then add an extra particle at then end of pl
@@ -942,7 +943,7 @@ contains
        call self%add_part(part_out(2))
     end do
 
-    print *, "clean up"
+    ! print *, "clean up"
     call self%clean_up()
   end subroutine merge_and_split
 

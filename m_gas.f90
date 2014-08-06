@@ -37,38 +37,36 @@ contains
 
   subroutine GAS_initialize(comp_names, comp_fracs, pressure, temperature)
     use m_units_constants
-
     character(len=*), intent(in) :: comp_names(:)
-    real(dp), intent(in) :: comp_fracs(size(gas_comp_names)), pressure, temperature
+    real(dp), intent(in)         :: comp_fracs(:), pressure, temperature
 
-    GAS_num_gases = size(gas_comp_names)
-    allocate( GAS_comp_fracs(GAS_num_gases) )
-    allocate( GAS_comp_names(GAS_num_gases) )
-
-    GAS_comp_names = comp_names
-    GAS_comp_fracs = comp_fracs
-    GAS_pressure = pressure
+    GAS_num_gases   = size(comp_names)
+    GAS_pressure    = pressure
     GAS_temperature = temperature
+    allocate(GAS_comp_fracs(GAS_num_gases))
+    allocate(GAS_comp_names(GAS_num_gases))
+    GAS_comp_names  = comp_names
+    GAS_comp_fracs  = comp_fracs
 
     ! Ideal gas law, pressure is in bar
-    GAS_number_dens = 1.0D5 * GAS_pressure / (UC_boltzmann_const * GAS_temperature)
-
+    GAS_number_dens = 1.0D5 * GAS_pressure / &
+         (UC_boltzmann_const * GAS_temperature)
   end subroutine GAS_initialize
 
   real(dp) function GAS_get_fraction(comp_name)
     character(LEN=*), intent(IN) :: comp_name
-    integer :: ix
+    integer                      :: ix
 
     do ix = 1, GAS_num_gases
-       if (comp_name == trim(GAS_comp_names(ix))) exit
+       if (comp_name == trim(GAS_comp_names(ix))) then
+          GAS_get_fraction = GAS_comp_fracs(ix)
+          return
+       end if
     end do
 
-    if (ix == GAS_num_gases + 1) then
-       print *, "GAS_get_fraction: " // comp_name // " not found"
-       stop
-    else
-       GAS_get_fraction = GAS_comp_fracs(ix)
-    end if
+    print *, "GAS_get_fraction: " // comp_name // " not found"
+    GAS_get_fraction = 0.0_dp
+    stop
   end function GAS_get_fraction
 
   integer function GAS_get_num_gases()
