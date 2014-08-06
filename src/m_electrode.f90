@@ -39,9 +39,8 @@ module m_electrode
 
 contains
 
-  !> Generates a list of points that lie on the electrode surface, where we want to have the electrode potential.
-  !!
-  !! Currently this list of point remains constant during the simulation.
+  ! Generates a list of points that lie on the electrode surface, where we want
+  ! to have the electrode potential.
   subroutine EL_initialize(cfg, rng, r_max, myrank, root)
     use m_config
     use m_random
@@ -61,7 +60,7 @@ contains
     call CFG_get(cfg, "elec_rc_trans", EL_RcTrans)
     call CFG_get(cfg, "elec_spacing", EL_spacing)
 
-    call CFG_get(cfg, "elec_xyz_rel_pos", EL_xyzPos)
+    call CFG_get(cfg, "elec_rel_pos", EL_xyzPos)
     EL_topAngle  = atan(EL_Rcyl / EL_Hcone)
     H_cone_eff = EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - 1.0D0)
     EL_Hcyl      = EL_xyzPos(3) * r_max(3) - H_cone_eff - EL_spacing
@@ -150,7 +149,7 @@ contains
 
     ! Now store the surface points
     EL_nPoints = sum(nHorizontal)
-    print *, "EL_nPoints: ", EL_nPoints
+    print *, "Electrode #points: ", EL_nPoints
     allocate( EL_surfacePoints(3, EL_nPoints) )
     allocate( EL_charges(EL_nPoints) )
     allocate( EL_weightFactors(EL_nPoints) )

@@ -15,276 +15,125 @@
 
 module m_misc_process
 
-   implicit none
-   private
+  implicit none
+  private
 
-   integer, parameter :: dp = kind(0.0d0)
+  integer, parameter :: dp = kind(0.0d0)
+  integer  :: MISC_sum_detach
 
-   real(dp) :: MISC_tau_excited, MISC_quench_fac
-   real(dp) :: MISC_min_inv_abs_len, MISC_max_inv_abs_len, MISC_frac_O2
+  real(dp) :: MISC_N2_bgdens
+  real(dp) :: MISC_O2_bgdens
+  real(dp) :: MISC_dt
 
-   integer :: MISC_table_size
-   integer :: MISC_sum_detach
-   integer :: MISC_sum_photons
-
-   ! Global variables
-   real(dp) :: MISC_loss_frac
-   real(dp) :: MISC_N2_bgdens
-   real(dp) :: MISC_O2_bgdens
-   real(dp) :: MISC_dt
-
-   real(dp), dimension(:, :), allocatable :: MISC_photo_eff_table
-
-   public :: MISC_photoionization
-   public :: MISC_initialize
-   public :: MISC_detachment
+  public :: MISC_initialize
+  public :: MISC_detachment
 
 contains
 
-   subroutine MISC_initialize(cfg)
-      use m_gas
-      use m_units_constants
-      use m_config
-      type(CFG_t), intent(in) :: cfg
-      integer :: t_size
-      real(dp) :: temp_vec(2)
-      call CFG_get(cfg, "photoi_mean_life_time_excited", MISC_tau_excited)
+  subroutine MISC_initialize()
+    use m_gas
+    MISC_O2_bgdens = GAS_get_number_dens() * GAS_get_fraction("O2")
+    MISC_N2_bgdens = GAS_get_number_dens() * GAS_get_fraction("N2")
+  end subroutine MISC_initialize
 
-      MISC_frac_O2 = GAS_get_fraction("O2")
+  subroutine MISC_detachment(pc, rng, dt, myrank, root)
+    use m_efield_amr
+    use m_particle_core
+    use m_random
+    real(dp), intent(in) :: dt
+    integer, intent(in)  :: myrank, root
+    type(PC_t), intent(inout) :: pc
+    type(RNG_t), intent(inout) :: rng
 
-      if (MISC_frac_O2 <= epsilon(1.0_dp)) then
-         print *, "There is no oxygen, you should disable photoionzation"
-         stop
-      end if
+    ! Set global vars
+    MISC_dt         = dt
+    MISC_sum_detach = 0
 
-      MISC_O2_bgdens = GAS_get_number_dens() * GAS_get_fraction("O2")
-      MISC_N2_bgdens = GAS_get_number_dens() * GAS_get_fraction("N2")
+    call E_collect_mpi((/E_i_O2m/), myrank, root)
 
-      call CFG_get(cfg, "photoi_absorp_inv_lengths", temp_vec)
-      MISC_min_inv_abs_len = temp_vec(1) * MISC_frac_O2 * GAS_get_pressure()
-      MISC_max_inv_abs_len = temp_vec(2) * MISC_frac_O2 * GAS_get_pressure()
+    if (myrank == root) then
+       call E_loop_over_grids(pc, rng, update_detachment)
+       print *, "Number of detachments", MISC_sum_detach
+    end if
+  end subroutine MISC_detachment
 
-      print *, "Max absorbp. length for photoionization ", 1.0d3 / MISC_min_inv_abs_len, "mm"
-      print *, "Min absorbp. length for photoionization ", 1.0d3 / MISC_max_inv_abs_len, "mm"
+  subroutine update_detachment(pc, rng, amr_grid)
+    use m_efield_amr
+    use m_particle_core
+    use m_particle
+    use m_random
+    use m_phys_domain
+    type(PC_t), intent(inout)       :: pc
+    type(RNG_t), intent(inout)      :: rng
+    type(amr_grid_t), intent(inout) :: amr_grid
+    real(dp), allocatable           :: loss(:,:,:)
+    logical, allocatable            :: child_region(:, :, :)
+    integer                         :: i, j, k, Nx, Ny, Nz
+    integer                         :: n, nc, i_min(3), i_max(3), n_detach
+    real(dp)                        :: xyz(3), e_str
 
-      MISC_quench_fac = (30.0D0 * UC_torr_to_bar) / (GAS_get_pressure() + (30.0D0 * UC_torr_to_bar))
-      call CFG_get_size(cfg, "photoi_efield_table", MISC_table_size)
+    Nx = amr_grid%Nr(1)
+    Ny = amr_grid%Nr(2)
+    Nz = amr_grid%Nr(3)
 
-      call CFG_get_size(cfg, "photoi_efficiency_table", t_size)
-      if (MISC_table_size /= t_size) then
-         print *, "Make sure photoi_efield_table and photoi_efficiency_table ",&
-              "have the same size"
-         stop
-      end if
+    ! Create mask where children are
+    allocate(child_region(Nx, Ny, Nz))
+    allocate(loss(Nx, Ny, Nz))
+    child_region = .false.
 
-      allocate( MISC_photo_eff_table(2, MISC_table_size) )
+    do nc = 1, amr_grid%n_child
+       i_min = E_xyz_to_ix(amr_grid, amr_grid%children(nc)%r_min)
+       i_max = E_xyz_to_ix(amr_grid, amr_grid%children(nc)%r_max)
+       child_region(i_min(1):i_max(1), i_min(2):i_max(2), i_min(3):i_max(3)) = .true.
+    end do
 
-      call CFG_get(cfg, "photoi_EfieldTable", MISC_photo_eff_table(1,:) )
-      call CFG_get(cfg, "photoi_efficiencyTable", MISC_photo_eff_table(2,:) )
+    do k = 1, Nz
+       do j = 1, Ny
+          do i = 1, Nx
+             xyz           = E_ix_to_xyz(amr_grid, (/i, j, k/))
+             e_str         = norm2(E_get_field(xyz))
+             loss(i, j, k) = MISC_get_O2m_loss(amr_grid%vars(i,j,k, E_i_O2m), e_str)
+          end do
+       end do
+    end do
 
-   end subroutine MISC_initialize
+    amr_grid%vars(:,:,:, E_i_O2m) = amr_grid%vars(:,:,:, E_i_O2m) - loss
 
-   real(dp) function findPhotoEff(E_f)
-     use m_lookup_table
-      ! Returns the photo-efficiency coefficient corresponding to an electric
-      ! field of strength E_f
-      real(dp), intent(IN) :: E_f
-      call LT_lin_interp_list(MISC_photo_eff_table(1,:), &
-           MISC_photo_eff_table(2,:), E_f, findPhotoEff)
-   end function findPhotoEff
+    where (child_region)
+       loss = 0.0_dp
+    elsewhere
+       loss = loss * product(amr_grid%dr)
+    end where
 
-   real(dp) function Pho_kf(energy_frac)
-      ! Returns the inverse mean free path for a photon.
-      real(dp), intent(IN) :: energy_frac
-      Pho_kf = MISC_min_inv_abs_len * (MISC_max_inv_abs_len/MISC_min_inv_abs_len)**energy_frac
-   end function
+    do k = 1, Nz
+       do j = 1, Ny
+          do i = 1, Nx
+             if (loss(i,j,k) <= epsilon(1.0_dp)) cycle
 
-   subroutine MISC_photoionization(pc, rng, dt, myrank, root)
-      use m_efield_amr
-      use m_particle_core
-      use m_random
-      type(PC_t), intent(inout) :: pc
-      type(RNG_t), intent(inout) :: rng
-      real(dp), intent(in) :: dt
-      integer, intent(in)  :: myrank, root
+             xyz             = E_ix_to_xyz(amr_grid, (/i, j, k/))
+             n_detach        = rng%poisson(loss(i,j,k))
+             MISC_sum_detach = MISC_sum_detach + n_detach ! Global variable :(
 
-      ! Set global vars
-      MISC_loss_frac   = 1.0_dp - exp(-dt / MISC_tau_excited)
-      MISC_sum_photons = 0
+             do n = 1, n_detach
+                if (.not. PD_outside_domain(xyz)) &
+                     call PM_create_ei_pair(pc, xyz)
+             end do
+          end do
+       end do
+    end do
 
-      call E_collect_mpi((/E_i_exc/), myrank, root)
+  end subroutine update_detachment
 
-      if (myrank == root) then
-         call E_loop_over_grids(pc, rng, update_excited)
-         print *, "Number of ionizing photons:", MISC_sum_photons
-      end if
-   end subroutine MISC_photoionization
+  real(dp) function MISC_get_O2m_loss(O2min_dens, e_str)
+    use m_gas
+    use m_units_constants
+    real(dp), intent(in) :: O2min_dens, e_str
+    real(dp) :: T_eff
 
-   subroutine update_excited(pc, rng, amr_grid)
-      use m_efield_amr
-      use m_phys_domain
-      use m_random
-      use m_particle_core
-      use m_particle
-      type(PC_t), intent(inout) :: pc
-      type(RNG_t), intent(inout) :: rng
-      type(amr_grid_t), intent(inout) :: amr_grid
-      real(dp), allocatable           :: loss(:,:,:)
-      logical, allocatable            :: child_region(:, :, :)
-      integer                         :: i, j, k, Nx, Ny, Nz
-      integer                         :: n, nc, i_min(3), i_max(3), n_photons
-      real(dp)                        :: xyz(3), x_end(3), flylen, chi, psi, e_str, energy_frac
+    T_eff = GAS_get_temperature() + UC_N2_mass / (3.0d0 * UC_boltzmann_const) * (e_str * 2.0d-4)**2
+    MISC_get_O2m_loss = 1.9d-12 * sqrt(T_eff/3.0d2) * exp(-4.990e3/T_eff) * MISC_N2_bgdens * 1.0d-6 + &
+         2.7d-10 * sqrt(T_eff/3.0d2) * exp(-5.590e3/T_eff) * MISC_O2_bgdens * 1.0d-6
+    MISC_get_O2m_loss = MISC_get_O2m_loss * O2min_dens * MISC_dt
+  end function MISC_get_O2m_loss
 
-      Nx = amr_grid%Nr(1)
-      Ny = amr_grid%Nr(2)
-      Nz = amr_grid%Nr(3)
-
-      ! Create mask where children are
-      allocate(child_region(Nx, Ny, Nz))
-      allocate(loss(Nx, Ny, Nz))
-      child_region = .false.
-
-      do nc = 1, amr_grid%n_child
-         i_min = E_xyz_to_ix(amr_grid, amr_grid%children(nc)%r_min)
-         i_max = E_xyz_to_ix(amr_grid, amr_grid%children(nc)%r_max)
-         child_region(i_min(1):i_max(1), i_min(2):i_max(2), i_min(3):i_max(3)) = .true.
-      end do
-
-      loss = amr_grid%vars(:,:,:, E_i_exc) * MISC_loss_frac ! Global variable :(
-      amr_grid%vars(:,:,:, E_i_exc) = amr_grid%vars(:,:,:, E_i_exc) - loss
-
-      where (child_region)
-         loss = 0.0_dp
-      elsewhere
-         loss = loss * product(amr_grid%dr)
-      end where
-
-      do k = 1, Nz
-         do j = 1, Ny
-            do i = 1, Nx
-               if (loss(i,j,k) <= epsilon(1.0_dp)) cycle
-
-               xyz            = E_ix_to_xyz(amr_grid, (/i, j, k/))
-               e_str          = norm2(E_get_field(xyz))
-               n_photons      = rng%poisson(findPhotoEff(e_str) * loss(i,j,k) * MISC_quench_fac)
-               MISC_sum_photons = MISC_sum_photons + n_photons ! Global variable :(
-
-               do n = 1, n_photons
-                  energy_frac = rng%uni_01()
-                  flylen      = -log(1.0_dp - rng%uni_01()) / Pho_kf(energy_frac)
-                  psi         = 2 * acos(-1.0_dp) * rng%uni_01()
-                  chi         = acos(1.0_dp - 2 * rng%uni_01())
-
-                  x_end(1)    = xyz(1) + flylen * sin(chi) * cos(psi)
-                  x_end(2)    = xyz(2) + flylen * sin(chi) * sin(psi)
-                  x_end(3)    = xyz(3) + flylen * cos(chi)
-
-                   ! Create electron-ion pair with excess enery of photon
-                  if (.not. PD_outside_domain(x_end)) &
-                       call PM_create_ei_pair(pc, x_end)
-               end do
-            end do
-         end do
-      end do
-   end subroutine update_excited
-
-   subroutine MISC_detachment(pc, rng, dt, myrank, root)
-     use m_efield_amr
-     use m_particle_core
-     use m_random
-     real(dp), intent(in) :: dt
-     integer, intent(in)  :: myrank, root
-     type(PC_t), intent(inout) :: pc
-     type(RNG_t), intent(inout) :: rng
-     ! Set global vars
-     MISC_dt = dt
-     MISC_sum_detach = 0
-
-     call E_collect_mpi((/E_i_O2m/), myrank, root)
-
-     if (myrank == root) then
-        call E_loop_over_grids(pc, rng, update_detachment)
-        print *, "Number of detachments", MISC_sum_detach
-     end if
-   end subroutine MISC_detachment
-
-   subroutine update_detachment(pc, rng, amr_grid)
-      use m_efield_amr
-      use m_particle_core
-      use m_particle
-      use m_random
-      use m_phys_domain
-      type(PC_t), intent(inout) :: pc
-      type(RNG_t), intent(inout) :: rng
-      type(amr_grid_t), intent(inout) :: amr_grid
-      real(dp), allocatable           :: loss(:,:,:)
-      logical, allocatable            :: child_region(:, :, :)
-      integer                         :: i, j, k, Nx, Ny, Nz
-      integer                         :: n, nc, i_min(3), i_max(3), n_detach
-      real(dp)                        :: xyz(3), e_str
-
-      Nx = amr_grid%Nr(1)
-      Ny = amr_grid%Nr(2)
-      Nz = amr_grid%Nr(3)
-
-      ! Create mask where children are
-      allocate(child_region(Nx, Ny, Nz))
-      allocate(loss(Nx, Ny, Nz))
-      child_region = .false.
-
-      do nc = 1, amr_grid%n_child
-         i_min = E_xyz_to_ix(amr_grid, amr_grid%children(nc)%r_min)
-         i_max = E_xyz_to_ix(amr_grid, amr_grid%children(nc)%r_max)
-         child_region(i_min(1):i_max(1), i_min(2):i_max(2), i_min(3):i_max(3)) = .true.
-      end do
-
-      do k = 1, Nz
-         do j = 1, Ny
-            do i = 1, Nx
-               xyz           = E_ix_to_xyz(amr_grid, (/i, j, k/))
-               e_str         = norm2(E_get_field(xyz))
-               loss(i, j, k) = MISC_get_O2m_loss(amr_grid%vars(i,j,k, E_i_O2m), e_str)
-            end do
-         end do
-      end do
-
-      amr_grid%vars(:,:,:, E_i_exc) = amr_grid%vars(:,:,:, E_i_exc) - loss
-
-      where (child_region)
-         loss = 0.0_dp
-      elsewhere
-         loss = loss * product(amr_grid%dr)
-      end where
-
-      do k = 1, Nz
-         do j = 1, Ny
-            do i = 1, Nx
-               if (loss(i,j,k) <= epsilon(1.0_dp)) cycle
-
-               xyz             = E_ix_to_xyz(amr_grid, (/i, j, k/))
-               n_detach        = rng%poisson(loss(i,j,k))
-               MISC_sum_detach = MISC_sum_detach + n_detach ! Global variable :(
-
-               do n = 1, n_detach
-                  if (.not. PD_outside_domain(xyz)) &
-                       call PM_create_ei_pair(pc, xyz)
-               end do
-            end do
-         end do
-      end do
-
-   end subroutine update_detachment
-
-   real(dp) function MISC_get_O2m_loss(O2min_dens, e_str)
-      use m_gas
-      use m_units_constants
-      real(dp), intent(in) :: O2min_dens, e_str
-      real(dp) :: T_eff
-
-      T_eff = GAS_get_temperature() + UC_N2_mass / (3.0d0 * UC_boltzmann_const) * (e_str * 2.0d-4)**2
-      MISC_get_O2m_loss = 1.9d-12 * sqrt(T_eff/3.0d2) * exp(-4.990e3/T_eff) * MISC_N2_bgdens * 1.0d-6 + &
-           2.7d-10 * sqrt(T_eff/3.0d2) * exp(-5.590e3/T_eff) * MISC_O2_bgdens * 1.0d-6
-      MISC_get_O2m_loss = MISC_get_O2m_loss * O2min_dens * MISC_dt
-   end function MISC_get_O2m_loss
-
- end module m_misc_process
+end module m_misc_process

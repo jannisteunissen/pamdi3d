@@ -27,12 +27,12 @@ module m_efield_amr
    end type box_t
 
    integer, parameter :: E_i_pot  = 1, E_i_pion = 2, E_i_elec = 3, &
-        E_i_nion = 4, E_i_O2m  = 5, E_i_exc  = 6, E_i_src  = 7, &
-        E_i_Ex   = 8, E_i_Ey   = 9, E_i_Ez   = 10, E_i_tmp = 11, E_n_vars = 11
+        E_i_nion = 4, E_i_O2m  = 5, E_i_src  = 6, &
+        E_i_Ex   = 7, E_i_Ey   = 8, E_i_Ez   = 9, E_i_tmp = 10, E_n_vars = 10
    character(len=*), parameter :: E_var_names(*) = (/"pot ", "pion", "elec", &
-        "nion", "O2m ", "exc ", "src ", "Ex  ", "Ey  ", "Ez  ", "E   "/)
+        "nion", "O2m ", "src ", "Ex  ", "Ey  ", "Ez  ", "E   "/)
    character(len=*), parameter :: E_var_units(*) = (/"V   ", "1_m3", "1_m3", &
-        "1_m3", "1_m3", "1_m3", "1_m3", "V_m ", "V_m ", "V_m ", "V_m "/)
+        "1_m3", "1_m3", "1_m3", "V_m ", "V_m ", "V_m ", "V_m "/)
 
    integer  :: E_min_grid_size
    integer  :: E_bc_type
@@ -59,7 +59,7 @@ module m_efield_amr
    type(amr_grid_t), pointer :: root_grid
 
    public :: amr_grid_t
-   public :: E_i_elec, E_i_pion, E_i_nion, E_i_O2m, E_i_exc
+   public :: E_i_elec, E_i_pion, E_i_nion, E_i_O2m
 
    public :: E_initialize
    public :: E_benchmark
@@ -90,7 +90,7 @@ contains
       use m_config
       use m_phys_domain
       type(CFG_t), intent(in) :: cfg
-      integer             :: dyn_size, ref_size
+      integer                 :: dyn_size, ref_size
 
       call CFG_get(cfg, "ref_min_grid_size", E_min_grid_size)
       call CFG_get(cfg, "ref_min_grid_separation", E_min_grid_separation)
@@ -229,7 +229,7 @@ contains
             call EL_setWeightFactor(ix, 1.0d0 / diff_voltage(ix))
          end do
          call copy_var_to_var_recursive(root_grid, E_i_tmp, E_i_pot)
-         print *, "Max change in weightfactor", max_diff_weight
+         ! print *, "Max change in weightfactor", max_diff_weight
       end if
    end subroutine E_adjust_electrode
 
@@ -529,7 +529,8 @@ contains
       type(amr_grid_t), pointer :: new_grid
 
       ! print *, myrank, "updating grids"
-      call mpi_collect_recursive(root_grid, (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_exc/), myrank, root)
+      call mpi_collect_recursive(root_grid, &
+           (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/), myrank, root)
 
       if (myrank == root) then
          allocate(new_grid)
@@ -538,7 +539,8 @@ contains
          new_grid%children => null()
 
          ! Boundary values are not correctly set in a PIC simulation, so get from parent
-         call set_bc_from_parent_recursive(root_grid, (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_exc/))
+         call set_bc_from_parent_recursive(root_grid, &
+              (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/))
          call set_new_grids_recursive(new_grid)
          call recursive_remove_amr_grid(root_grid)
          deallocate(root_grid)
@@ -594,7 +596,7 @@ contains
       integer, allocatable                    :: ref_ixs(:, :)
       type(box_t), allocatable                :: box_list(:)
       integer, parameter                      :: v_ixs(*) = &
-           (/E_i_pion, E_i_nion, E_i_O2m, E_i_exc, E_i_elec/)
+           (/E_i_pion, E_i_nion, E_i_O2m, E_i_elec/)
 
       if (associated(amr_grid%children) .or. amr_grid%n_child > 0) then
          print *, "set_new_grids_recursive error: children already present!"
@@ -650,7 +652,7 @@ contains
          n_child          = size(box_list)
          amr_grid%n_child = n_child
          allocate(amr_grid%children(n_child))
-         print *, "Refining, children", n_child, n_ref
+         ! print *, "Refining, children", n_child, n_ref
 
          do nc = 1, n_child
             i_min = box_list(nc)%i_min
@@ -1328,10 +1330,12 @@ contains
       character(len=100), allocatable :: mesh_name_list(:), var_name_list(:, :)
       character(len=*), parameter     :: grid_name = "grid_", amr_name = "amr_grid"
 
-      call mpi_collect_recursive(root_grid, (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_exc/), myrank, root)
+      call mpi_collect_recursive(root_grid, &
+           (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/), myrank, root)
 
       if (myrank == root) then
-         call set_bc_from_parent_recursive(root_grid, (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_exc/))
+         call set_bc_from_parent_recursive(root_grid, &
+              (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/))
          call create_grid_list(root_grid, grid_list)
          call SILO_create_file(filename)
 

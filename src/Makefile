@@ -1,7 +1,7 @@
 FC 	:= mpif90
-FFLAGS	:= -Wall -Wextra -fcheck=all -ffpe-trap=invalid,zero,overflow -g -O0
+FFLAGS	:= -Wall -O2 #-fcheck=all -ffpe-trap=invalid,zero,overflow -g
 OBJS	:= m_particle.o m_efield_amr.o m_init_cond.o m_electrode.o\
-	 m_write_silo.o m_misc_process.o m_phys_domain.o
+	 m_write_silo.o m_misc_process.o m_phys_domain.o m_photoi.o
 
 INCDIRS	:= ../../fosito ../../particle_core\
  ../pamdi3d_libs/silo_lib/include
@@ -24,7 +24,7 @@ clean:
 
 # Dependency information
 ../pamdi3d:		$(OBJS)
-m_particle.o:		m_efield_amr.o
+m_particle.o:		m_efield_amr.o m_photoi.o
 m_efield_amr.o:		m_electrode.o m_write_silo.o m_phys_domain.o
 m_init_cond.o:		m_efield_amr.o
 m_misc_process.o:	m_particle.o

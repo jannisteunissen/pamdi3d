@@ -9,6 +9,7 @@ module m_particle
   real(dp) :: PM_part_per_cell
   real(dp) :: PM_coord_weights(6)
   real(dp) :: PM_max_distance
+  logical :: PM_use_photoi
 
   abstract interface
      integer function p_to_int(my_part)
@@ -18,10 +19,10 @@ module m_particle
   end interface
 
   type, extends(PC_bin_t) :: bin_t
-     real(dp) :: x_min
-     real(dp) :: inv_dx
-   contains
-     procedure :: bin_func => PM_bin_func
+    real(dp) :: x_min
+    real(dp) :: inv_dx
+  contains
+    procedure :: bin_func => PM_bin_func
   end type bin_t
 
   type(bin_t), public :: PM_binner
@@ -47,7 +48,7 @@ contains
     type(CFG_t), intent(in)   :: cfg
 
     integer                   :: n_part_max, tbl_size
-    real(dp) :: max_ev
+    real(dp)                  :: max_ev
 
     call CFG_get(cfg, "part_max_weight", PM_max_weight)
     call CFG_get(cfg, "part_per_cell", PM_part_per_cell)
@@ -56,25 +57,41 @@ contains
     call CFG_get(cfg, "part_max_num", n_part_max)
     call CFG_get(cfg, "part_lkp_tbl_size", tbl_size)
     call CFG_get(cfg, "part_max_ev", max_ev)
+    call CFG_get(cfg, "photoi_enabled", PM_use_photoi)
 
     call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_ev, n_part_max)
     call pc%set_coll_callback(coll_callback)
     call pc%set_outside_check(outside_check)
 
-    PM_binner%n_bins = 1000
+    PM_binner%n_bins = 5000
     PM_binner%inv_dx = (PM_binner%n_bins-1) / PD_r_max(1)
   end subroutine PM_initialize
 
-  subroutine coll_callback(my_part, c_ix, c_type)
+  subroutine coll_callback(pc, my_part, c_ix, c_type)
     use m_cross_sec
     use m_efield_amr
+    use m_photoi
+    use m_phys_domain
+    class(PC_t), intent(inout)  :: pc
     type(PC_part_t), intent(in) :: my_part
-    integer, intent(in) :: c_ix, c_type
+    integer, intent(in)         :: c_ix, c_type
+    integer :: n, n_photons
+    real(dp), allocatable :: photons(:,:)
+
     select case (c_type)
     case (CS_ionize_t)
        call E_add_to_var(E_i_pion, my_part%x, my_part%w)
-       ! This is for photoionization
-       call E_add_to_var(E_i_exc, my_part%x, my_part%w)
+
+       if (PM_use_photoi) then
+          call pi_from_ionization(my_part, photons)
+
+          n_photons = size(photons, 2)
+          do n = 1, n_photons
+             if (.not. PD_outside_domain(photons(:, n))) &
+                  call PM_create_ei_pair(pc, photons(:, n))
+          end do
+       end if
+
     case (CS_attach_t)
        call E_add_to_var(E_i_O2m, my_part%x, my_part%w)
     end select
