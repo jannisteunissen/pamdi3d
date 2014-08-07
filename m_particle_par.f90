@@ -110,7 +110,7 @@ contains
     integer, allocatable :: n_part_per_bin(:), ix_list(:)
     real(dp), allocatable :: bin_ixs(:)
 
-    ! print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
+    print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
 
     ! Get the number of particles each task has
     call MPI_ALLGATHER(pc%n_part, 1, MPI_integer, n_part_task, 1, &
@@ -183,7 +183,7 @@ contains
                 i_max     = pc%n_part + n_send
                 pc%n_part = i_max
                 call pc%check_space(i_max)
-                ! print *, myrank, ": receives", n_send, "from", sender, "i_min", i_min
+                ! print *, myrank, ": receives", n_send, "from", sender, "i_max", i_max
                 call recv_parts_mpi(pc%particles(i_min:i_max), sender, tag)
              end if
           end do
