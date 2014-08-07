@@ -38,7 +38,7 @@ module m_particle
 
 contains
 
-  subroutine PM_initialize(pc, cross_secs, cfg)
+  subroutine PM_initialize(pc, cross_secs, cfg, myrank, ntasks)
     use m_units_constants
     use m_cross_sec
     use m_config
@@ -46,9 +46,11 @@ contains
     type(PC_t), intent(inout) :: pc
     type(CS_t), intent(in)    :: cross_secs(:)
     type(CFG_t), intent(in)   :: cfg
+    integer, intent(in)       :: myrank, ntasks
 
-    integer                   :: n_part_max, tbl_size
+    integer                   :: n_part_max, part_per_task, tbl_size
     real(dp)                  :: max_ev
+    type(PC_part_t)           :: temp_part
 
     call CFG_get(cfg, "part_max_weight", PM_max_weight)
     call CFG_get(cfg, "part_per_cell", PM_part_per_cell)
@@ -59,12 +61,16 @@ contains
     call CFG_get(cfg, "part_max_ev", max_ev)
     call CFG_get(cfg, "photoi_enabled", PM_use_photoi)
 
-    call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_ev, n_part_max)
+    part_per_task = n_part_max / ntasks
+    call pc%initialize(UC_elec_mass, cross_secs, tbl_size, &
+         max_ev, part_per_task)
     call pc%set_coll_callback(coll_callback)
     call pc%set_outside_check(outside_check)
 
     PM_binner%n_bins = 5000
     PM_binner%inv_dx = (PM_binner%n_bins-1) / PD_r_max(1)
+    if (myrank == 0) print *, "Particle model uses", &
+         (storage_size(temp_part) / 2.0_dp**33) * n_part_max, "GB"
   end subroutine PM_initialize
 
   subroutine coll_callback(pc, my_part, c_ix, c_type)

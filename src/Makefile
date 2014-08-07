@@ -1,5 +1,5 @@
 FC 	:= mpif90
-FFLAGS	:= -Wall -O2 #-fcheck=all -ffpe-trap=invalid,zero,overflow -g
+FFLAGS	:= -Wall -O2 -fcheck=all -g -ffpe-trap=invalid,zero,overflow
 OBJS	:= m_particle.o m_efield_amr.o m_init_cond.o m_electrode.o\
 	 m_write_silo.o m_misc_process.o m_phys_domain.o m_photoi.o
 

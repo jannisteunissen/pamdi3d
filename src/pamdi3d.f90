@@ -76,6 +76,8 @@ program pamdi3d
   type(PC_t)  :: pc
   type(RNG_t) :: rng
 
+  sim_time        = 0.0D0
+
   call MPI_init(ierr)
   call MPI_comm_rank(MPI_COMM_WORLD, myrank, ierr)
   call MPI_comm_size(MPI_COMM_WORLD, ntasks, ierr)
@@ -124,7 +126,7 @@ program pamdi3d
   if (PD_use_elec) call EL_initialize(cfg, rng, PD_r_max, myrank, root)
 
   if (myrank == root) print *, " ~~~ initializing particle module"
-  call PM_initialize(pc, cross_secs, cfg)
+  call PM_initialize(pc, cross_secs, cfg, myrank, ntasks)
 
   call CFG_get(cfg, "photoi_enabled", use_photoi)
   call CFG_get(cfg, "sim_use_o2m_detach", use_detach)
@@ -191,7 +193,6 @@ program pamdi3d
   steps_left_fld  = 0
   n_part_sum_prev = PP_get_num_sim_part(pc)
 
-  sim_time        = 0.0D0
   prev_fld_time   = 0.0D0
   max_fld_err     = 0.0D0
   fld_err         = 0.0D0
@@ -539,7 +540,6 @@ contains
     CALL CFG_add(cfg, "elec_surface_points_scale", 1.0D0, &
          & "The scale factor for the distribution of surface points on the electrode.")
     call CFG_sort(cfg)
-    print *, "Created configuration"
   end subroutine create_config
 
 end program pamdi3d
