@@ -1,5 +1,5 @@
 FC 	:= mpif90
-FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -fcheck=all -g -O2 -fopenmp
+FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -g -O2 -fopenmp
 TESTS	:= test_m_particle_core test_m_cross_sec
 
 # Need these libraries for the tests

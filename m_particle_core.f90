@@ -841,11 +841,11 @@ contains
        end subroutine pptr_split
     end interface
 
-    procedure(p_to_r_f)    :: weight_func
+    procedure(p_to_r_f)          :: weight_func
 
     integer, parameter           :: num_neighbors = 1
-    real(dp), parameter          :: large_ratio   = 1.5_dp, &
-         small_ratio = 1 / large_ratio
+    real(dp), parameter          :: large_ratio   = 1.5_dp
+    real(dp), parameter          :: small_ratio   = 1 / large_ratio
     real(dp)                     :: distance
     type(kdtree2), pointer       :: kd_tree
     type(kdtree2_result)         :: kd_results(num_neighbors)
@@ -855,10 +855,11 @@ contains
     integer                      :: o_ix, o_nn_ix
     integer                      :: ix, neighbor_ix, cntr, num_coords
     logical, allocatable         :: already_merged(:)
-    integer, allocatable         :: part_ixs(:)
+    integer, allocatable         :: part_ixs(:), coord_ixs(:)
     real(dp), allocatable        :: coord_data(:, :), weight_ratios(:)
+    real(dp) :: coord_buf(6)
     type(PC_part_t), allocatable :: part_copy(:)
-    type(PC_part_t) :: part_out(2)
+    type(PC_part_t)              :: part_out(2)
 
     p_min    = 1
     p_max    = self%n_part
@@ -866,7 +867,6 @@ contains
 
     allocate(weight_ratios(num_part))
     allocate(part_ixs(num_part))
-    allocate(part_copy(num_part))
 
     do ix = 1, num_part
        weight_ratios(ix) = self%particles(p_min+ix-1)%w / &
@@ -876,32 +876,35 @@ contains
     num_merge      = count(weight_ratios <= small_ratio)
     num_coords     = count(coord_weights /= 0.0_dp)
     allocate(coord_data(num_coords, num_merge))
+    allocate(coord_ixs(num_coords))
     allocate(already_merged(num_merge))
     already_merged = .false.
     n_too_far      = 0
 
-    ! Sort particles by their relative weight and store them in part_copy
-    ! so that particles to be merged are at the beginning of the list
+    print *, "num_merge", num_merge
+
+    ! Sort particles by their relative weight
     call mrgrnk(weight_ratios, part_ixs)
-    part_copy = self%particles(p_min + part_ixs - 1)
 
     ! Only create a k-d tree if there are enough particles to be merged
     if (num_merge > num_coords) then
-       ! Store the coordinates of the particles to be merged in coord_data
+       
+       ! Store the coordinate ixs
        cntr = 0
        do ix = 1, 6
           if (coord_weights(ix) /= 0.0_dp) then
-             cntr = cntr + 1
-             if (ix <= 3) then ! Spatial coordinates
-                coord_data(cntr, :) = part_copy(1:num_merge)%x(ix) * &
-                     coord_weights(ix)
-             else              ! Velocity coordinates
-                coord_data(cntr, :) = part_copy(1:num_merge)%v(ix-3) * &
-                     coord_weights(ix)
-             end if
+             cntr      = cntr + 1
+             coord_ixs = cntr
           end if
        end do
 
+       do ix = 1, num_merge
+          o_ix              = part_ixs(ix)
+          coord_buf(1:3)    = self%particles(o_ix)%x
+          coord_buf(4:6)    = self%particles(o_ix)%v
+          coord_data(:, ix) = coord_buf(coord_ixs)
+       end do
+    
        ! Create k-d tree
        kd_tree => kdtree2_create(coord_data)
 
@@ -933,7 +936,7 @@ contains
 
     ! Split particles. These are at the end of part_copy
     num_split = count(weight_ratios >= large_ratio)
-    ! print *, "num_split:", num_split
+    print *, "num_split:", num_split
 
     do ix = num_part - num_split + 1, num_part
        ! Change part_copy(ix), then add an extra particle at then end of pl
