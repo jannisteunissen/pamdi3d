@@ -932,6 +932,8 @@ contains
           call self%remove_part(o_nn_ix)
           already_merged((/ix, neighbor_ix/)) = .true.
        end do
+
+       call kdtree2_destroy(kd_tree)
     end if
 
     ! Split particles. These are at the end of part_copy

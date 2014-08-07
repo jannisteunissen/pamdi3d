@@ -98,17 +98,19 @@ contains
     use mpi
     use m_lookup_table
     use m_mrgrnk
-    type(PC_t), intent(inout) :: pc
+    type(PC_t), intent(inout)   :: pc
     class(PC_bin_t), intent(in) :: binner
-    integer, intent(in) :: myrank, ntasks
-    integer :: ll, ix, dst, ierr, n_behind, n_part_interval, n_send
-    integer :: i_min, i_max
-    integer :: tag, part_count
-    integer :: n_sends, n_recvs, sender, recver, n_part_mean
-    integer :: n_part_task(0:ntasks-1)
-    integer :: n_part_dst_src(0:ntasks-1, 0:ntasks-1)
-    integer, allocatable :: n_part_per_bin(:), ix_list(:)
-    real(dp), allocatable :: bin_ixs(:)
+    integer, intent(in)         :: myrank, ntasks
+    integer                     :: ll, ix, dst, ierr, n_behind
+    integer                     :: n_part_interval, n_send
+    integer                     :: i_min, i_max
+    integer                     :: tag, part_count
+    integer                     :: n_mean_left, n_part_left
+    integer                     :: n_sends, n_recvs, sender, recver
+    integer                     :: n_part_task(0:ntasks-1)
+    integer                     :: n_part_dst_src(0:ntasks-1, 0:ntasks-1)
+    integer, allocatable        :: n_part_per_bin(:), ix_list(:)
+    real(dp), allocatable       :: bin_ixs(:)
 
     print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
 
@@ -116,7 +118,6 @@ contains
     call MPI_ALLGATHER(pc%n_part, 1, MPI_integer, n_part_task, 1, &
          MPI_integer, MPI_COMM_WORLD, ierr)
 
-    n_part_mean = (sum(n_part_task) + ntasks - 1) / ntasks
     allocate(n_part_per_bin(binner%n_bins))
     allocate(bin_ixs(pc%n_part))
     allocate(ix_list(pc%n_part))
@@ -141,24 +142,27 @@ contains
     n_behind            = 0
     n_part_dst_src(:,:) = 0
     n_part_interval     = 0
+    n_part_left         = sum(n_part_task)
+    n_mean_left         = ceiling(sum(n_part_task) / real(ntasks, dp))
 
     do ix = 1, binner%n_bins
        n_part_interval = n_part_interval + n_part_per_bin(ix)
 
-       if (n_part_interval >= n_part_mean .or. ix == binner%n_bins) then
-          n_part_interval = 0
-          part_count      = 0
-
+       if (n_part_interval >= n_mean_left .or. ix == binner%n_bins) then
+          part_count = 0
           do ll = n_behind+1, pc%n_part
              if (bin_ixs(ll) > ix) exit
              part_count = part_count + 1
           end do
 
           n_part_dst_src(dst, myrank) = part_count
-          n_behind = n_behind + part_count
-          dst = dst + 1
+          n_behind                    = n_behind + part_count
+          dst                         = dst + 1
+          n_part_left                 = n_part_left - n_part_interval
+          n_part_interval             = 0
 
           if (dst == ntasks) exit ! dst runs from from 0 to ntasks-1
+          n_mean_left = ceiling(n_part_left / real(ntasks-dst, dp))
        end if
 
     end do
@@ -248,7 +252,6 @@ contains
     rel_size = storage_size(parts(1)) / storage_size(1.0_dp)
     req_size = n_send * rel_size
     allocate(r_buf(req_size))
-
     call MPI_RECV(r_buf, req_size, MPI_DOUBLE_PRECISION, sender, tag, &
          & MPI_COMM_WORLD, mpi_status, ierr)
     parts = transfer(r_buf, parts, n_send)
