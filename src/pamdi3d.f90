@@ -466,8 +466,8 @@ contains
 
 
     ! Particle model related parameters
-    call CFG_add(cfg, "part_max_num", 5000*1000, &
-         "The maximum number of particles allowed per task")
+    call CFG_add(cfg, "part_max_num", 5*1000*1000, &
+         "The maximum total number of particles")
     call CFG_add(cfg, "part_n_samples", 1000, &
          "The number of samples to use (for estimates)")
     call CFG_add(cfg, "part_n_rescale", 1000*1000, &
