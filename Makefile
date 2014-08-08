@@ -1,5 +1,6 @@
 FC 	:= mpif90
-FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -g -O2 -fcheck=all -fopenmp
+FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -g -O2 -fopenmp \
+	-fcheck=array-temps,bounds,do,mem,pointer
 OBJS	:= m_gas.o m_particle_core.o m_particle_par.o m_cross_sec.o kdtree2.o
 
 INCDIRS	:= ../fosito
@@ -20,7 +21,7 @@ test: 	libparticle_core.a
 	$(MAKE) -C test
 
 clean:
-	$(RM) -f *.o *.mod
+	$(RM) -f *.o *.mod libparticle_core.a
 	$(MAKE) -C test clean
 
 # Dependency information

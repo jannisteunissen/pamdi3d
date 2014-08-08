@@ -818,12 +818,13 @@ contains
   ! maxium Euclidean distance between particles to be merged. The weight_func
   ! returns the desired weight for a particle, whereas the pptr_merge and
   ! pptr_split procedures merge and split particles.
-  subroutine merge_and_split(self, coord_weights, max_distance, weight_func, &
+  subroutine merge_and_split(self, x_mask, v_fac, use_v_norm, weight_func, &
        pptr_merge, pptr_split)
     use m_mrgrnk
     use kdtree2_module
-    class(PC_t), intent(inout)    :: self
-    real(dp), intent(in)         :: coord_weights(6), max_distance
+    class(PC_t), intent(inout) :: self
+    real(dp), intent(in)       :: v_fac
+    logical, intent(in)        :: x_mask(3), use_v_norm
 
     interface
        subroutine pptr_merge(part_a, part_b, part_out, rng)
@@ -846,19 +847,17 @@ contains
     integer, parameter           :: num_neighbors = 1
     real(dp), parameter          :: large_ratio   = 1.5_dp
     real(dp), parameter          :: small_ratio   = 1 / large_ratio
-    real(dp)                     :: distance
     type(kdtree2), pointer       :: kd_tree
     type(kdtree2_result)         :: kd_results(num_neighbors)
 
+    integer                      :: n_x_coord, n_coords
     integer                      :: num_part, num_merge, num_split
     integer                      :: p_min, p_max, n_too_far
     integer                      :: o_ix, o_nn_ix
-    integer                      :: ix, neighbor_ix, cntr, num_coords
+    integer                      :: ix, neighbor_ix
     logical, allocatable         :: already_merged(:)
     integer, allocatable         :: part_ixs(:), coord_ixs(:)
     real(dp), allocatable        :: coord_data(:, :), weight_ratios(:)
-    real(dp) :: coord_buf(6)
-    type(PC_part_t), allocatable :: part_copy(:)
     type(PC_part_t)              :: part_out(2)
 
     p_min    = 1
@@ -873,10 +872,13 @@ contains
             weight_func(self%particles(p_min+ix-1))
     end do
 
-    num_merge      = count(weight_ratios <= small_ratio)
-    num_coords     = count(coord_weights /= 0.0_dp)
-    allocate(coord_data(num_coords, num_merge))
-    allocate(coord_ixs(num_coords))
+    num_merge = count(weight_ratios <= small_ratio)
+    n_x_coord = count(x_mask)
+    n_coords  = n_x_coord + 3
+    if (use_v_norm) n_coords = n_coords - 2
+
+    allocate(coord_data(n_coords, num_merge))
+    allocate(coord_ixs(n_coords))
     allocate(already_merged(num_merge))
     already_merged = .false.
     n_too_far      = 0
@@ -887,24 +889,17 @@ contains
     call mrgrnk(weight_ratios, part_ixs)
 
     ! Only create a k-d tree if there are enough particles to be merged
-    if (num_merge > num_coords) then
-       
-       ! Store the coordinate ixs
-       cntr = 0
-       do ix = 1, 6
-          if (coord_weights(ix) /= 0.0_dp) then
-             cntr      = cntr + 1
-             coord_ixs = cntr
+    if (num_merge > n_coords) then
+       do ix = 1, num_merge
+          o_ix = part_ixs(ix)
+          coord_data(1:n_x_coord, ix) = pack(self%particles(o_ix)%x, x_mask)
+          if (use_v_norm) then
+             coord_data(n_x_coord+1, ix) = v_fac * norm2(self%particles(o_ix)%v)
+          else
+             coord_data(n_x_coord+1:, ix) = v_fac * self%particles(o_ix)%v
           end if
        end do
 
-       do ix = 1, num_merge
-          o_ix              = part_ixs(ix)
-          coord_buf(1:3)    = self%particles(o_ix)%x
-          coord_buf(4:6)    = self%particles(o_ix)%v
-          coord_data(:, ix) = coord_buf(coord_ixs)
-       end do
-    
        ! Create k-d tree
        kd_tree => kdtree2_create(coord_data)
 
@@ -917,9 +912,6 @@ contains
           neighbor_ix = kd_results(1)%idx
 
           if (already_merged(neighbor_ix)) cycle
-
-          distance = norm2(coord_data(:, ix) - coord_data(:, neighbor_ix))
-          if (distance > max_distance) cycle
 
           ! Get indices in the original particle list
           o_ix = part_ixs(ix)
@@ -936,7 +928,7 @@ contains
        call kdtree2_destroy(kd_tree)
     end if
 
-    ! Split particles. These are at the end of part_copy
+    ! Split particles.
     num_split = count(weight_ratios >= large_ratio)
     print *, "num_split:", num_split
 
