@@ -44,12 +44,13 @@ contains
   subroutine EL_initialize(cfg, rng, r_max, myrank, root)
     use m_config
     use m_random
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(in)    :: cfg
     type(RNG_t), intent(inout) :: rng
-    integer, intent(in) :: myrank, root
-    real(dp), intent(in) :: r_max(3)
-    real(dp) :: H_cone_eff
-    integer :: n_time_points
+    integer, intent(in)        :: myrank, root
+    real(dp), intent(in)       :: r_max(3)
+    real(dp)                   :: H_cone_eff
+    real(dp), parameter        :: bottom_rel_sep = 1.0e-3_dp
+    integer                    :: n_time_points
 
     ! Set up a basic electrode, with conical part and cylindrical part
     ! This should be moved to a subroutine, so that we can select different electrodes
@@ -63,7 +64,8 @@ contains
     call CFG_get(cfg, "elec_rel_pos", EL_xyzPos)
     EL_topAngle  = atan(EL_Rcyl / EL_Hcone)
     H_cone_eff = EL_Hcone - EL_Rctip * (1.0D0/sin(EL_topAngle) - 1.0D0)
-    EL_Hcyl      = EL_xyzPos(3) * r_max(3) - H_cone_eff - EL_spacing
+    EL_Hcyl      = EL_xyzPos(3) * r_max(3) - H_cone_eff - &
+         bottom_rel_sep * r_max(3)
     EL_topZ      = EL_Hcyl + H_cone_eff
     EL_xyzPos    = EL_xyzPos * r_max - (/0.0d0, 0.0d0, EL_topZ/)
 

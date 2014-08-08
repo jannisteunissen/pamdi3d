@@ -5,11 +5,10 @@ module m_particle
   private
 
   integer, parameter :: dp = kind(0.0d0)
-  real(dp) :: PM_max_weight
-  real(dp) :: PM_part_per_cell
-  real(dp) :: PM_coord_weights(6)
-  real(dp) :: PM_max_distance
-  logical :: PM_use_photoi
+  real(dp)           :: PM_max_weight
+  real(dp)           :: PM_part_per_cell
+  real(dp)           :: PM_v_rel_weight
+  logical            :: PM_use_photoi
 
   abstract interface
      integer function p_to_int(my_part)
@@ -54,8 +53,7 @@ contains
 
     call CFG_get(cfg, "part_max_weight", PM_max_weight)
     call CFG_get(cfg, "part_per_cell", PM_part_per_cell)
-    call CFG_get(cfg, "part_merge_coord_weights", PM_coord_weights)
-    call CFG_get(cfg, "part_merge_max_distance", PM_max_distance)
+    call CFG_get(cfg, "part_v_rel_weight", PM_v_rel_weight)
     call CFG_get(cfg, "part_max_num", n_part_max)
     call CFG_get(cfg, "part_lkp_tbl_size", tbl_size)
     call CFG_get(cfg, "part_max_ev", max_ev)
@@ -127,28 +125,30 @@ contains
 
   subroutine PM_adjust_weights(pc)
     type(PC_t), intent(inout) :: pc
-    call pc%merge_and_split(PM_coord_weights, PM_max_distance, &
-         weight_func, PC_merge_part_rxv, PC_split_part)
+    call pc%merge_and_split((/.true., .true., .true./), PM_v_rel_weight, &
+         .true., weight_func, PC_merge_part_rxv, PC_split_part)
   end subroutine PM_adjust_weights
 
   function weight_func(my_part) result(weight)
     use m_efield_amr
     type(PC_part_t), intent(in) :: my_part
-    real(dp) :: weight, n_elec
+    real(dp)                    :: weight, n_elec
     n_elec = E_get_var_x_dr(E_i_elec, my_part%x)
-    weight = max(1.0_dp, min(PM_max_weight, n_elec / PM_part_per_cell))
+    weight = n_elec / PM_part_per_cell
+    weight = max(1.0_dp, min(PM_max_weight, weight))
   end function weight_func
 
   subroutine PM_fld_error(pc, rng, n_samples, fld_err, only_store)
     use m_efield_amr
     use m_random
+    use mpi
     type(PC_t), intent(in) :: pc
     type(RNG_t), intent(inout) :: rng
     integer, intent(in) :: n_samples
     real(dp), intent(out) :: fld_err
     logical, intent(in) :: only_store
 
-    integer :: i, n
+    integer :: i, n, ierr
     real(dp) :: fld(3), fld_sum
     real(dp), allocatable, save :: pos_samples(:, :)
     real(dp), allocatable, save :: fld_samples(:, :)
@@ -180,6 +180,9 @@ contains
        end do
        fld_err = fld_err * n_samples / fld_sum
     end if
+
+    call MPI_ALLREDUCE(MPI_IN_PLACE, fld_err, 1, MPI_DOUBLE_PRECISION, &
+         MPI_MAX, MPI_COMM_WORLD, ierr)
   end subroutine PM_fld_error
 
   subroutine PM_particles_to_density(pc)
@@ -229,7 +232,7 @@ contains
 
     dt_max = cfl_num * min_dr / vel_est
     call MPI_ALLREDUCE(MPI_IN_PLACE, dt_max, 1, MPI_DOUBLE_PRECISION, &
-         MPI_MAX, MPI_COMM_WORLD, ierr)
+         MPI_MIN, MPI_COMM_WORLD, ierr)
   end function PM_get_max_dt
 
   function PM_bin_func(binner, my_part) result(i_bin)

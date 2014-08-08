@@ -386,7 +386,7 @@ contains
          "The maximum allowed error in the electric field before recomputing it")
     call CFG_add(cfg, "sim_max_electrons", 1.0d99, &
          "Stop the simulation when this many electrons are in the simulation")
-    CALL CFG_add(cfg, "sim_min_incr_rescale", 1.5_dp, &
+    CALL CFG_add(cfg, "sim_min_incr_rescale", 1.2_dp, &
          & "The minimum increase in number of particles before their weights are rescaled (superparticle creation)")
     CALL CFG_add(cfg, "sim_n_runs_max", 1, &
          & "The number of runs to perform for simulation types that require this")
@@ -480,10 +480,8 @@ contains
          & "The minimum number of particles in a cell to consider rescaling them")
     CALL CFG_add(cfg, "part_max_weight", 1.0e3_dp, &
          & "Only particles with a weight < maxWeight will be rescaled")
-    CALL CFG_add(cfg, "part_merge_max_distance", 1.0d0, &
-         & "Only particles closer together than this var * delta can be merged")
-    call CFG_add(cfg, "part_merge_coord_weights", (/1.0_dp, 1.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), &
-         & "Only particles closer together than this var * delta can be merged")
+    call CFG_add(cfg, "part_v_rel_weight", 1.0e-12_dp, &
+         & "Scale factor for v coords compared to x coords when merging")
 
     ! Photoionization parameters
     call CFG_add(cfg, "photoi_enabled", .false., &
