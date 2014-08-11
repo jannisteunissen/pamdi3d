@@ -1,0 +1,3 @@
+gas_fractions           = 0.98d0 0.02d0
+gas_names               = "N2" "O2"
+sim_name                = pi_2pct

@@ -24,12 +24,11 @@ photoi_enabled          = t
 ref_delta_values        = 4.0d-6, 4.0d-6, 8.0d-6, 16.0d-6, 32.0d-6 64.0d-6 128.0d-6
 ref_max_efield_at_delta = 4.0d7 2.5d7 1.5d7 0.9d7 0.7d7 0.55d7 0.5d7
 ref_max_levels          = 8
-ref_min_elec_dens       = 0.0e9
+ref_min_elec_dens       = -1.0e9
 ref_min_lvl_electrode   = 4
-sim_efield_times        = 0.0
-sim_max_fld_err         = 25.0D-3
+sim_max_fld_err         = 7.5D-2
 sim_min_incr_rescale    = 1.2D0
-sim_name                = example_2
+sim_name                = change_me
 t_end                   = 100.0D-9
 
 elec_enabled    = t
