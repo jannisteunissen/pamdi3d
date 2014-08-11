@@ -39,6 +39,7 @@ contains
     use m_units_constants
     character(len=*), intent(in) :: comp_names(:)
     real(dp), intent(in)         :: comp_fracs(:), pressure, temperature
+    real(dp), parameter :: err_threshold = 1.0e-4_dp
 
     GAS_num_gases   = size(comp_names)
     GAS_pressure    = pressure
@@ -47,6 +48,11 @@ contains
     allocate(GAS_comp_names(GAS_num_gases))
     GAS_comp_names  = comp_names
     GAS_comp_fracs  = comp_fracs
+
+    if (abs(sum(GAS_comp_fracs) - 1) > err_threshold) then
+       print *, "Gas comps are not normalized: ", comp_fracs
+       stop
+    end if
 
     ! Ideal gas law, pressure is in bar
     GAS_number_dens = 1.0D5 * GAS_pressure / &
