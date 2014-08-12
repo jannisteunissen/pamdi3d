@@ -33,23 +33,24 @@ program pamdi3d
   use mpi
 
   implicit none
-  integer, parameter :: dp = kind(0.0d0)
-  character(LEN=80) :: sim_name, cfg_name, filename
+  integer, parameter             :: dp = kind(0.0d0)
+  character(LEN=80)              :: sim_name, cfg_name, filename
 
-  integer  :: n
-  integer  :: n_samples
-  integer  :: n_gas_comp
-  integer  :: step_cntr, steps_left_fld
-  integer  :: n_output, n_grid_adapt
-  integer  :: WCTime_start, WCTime_current
-  integer  :: n_part_rescale
-  integer  :: n_part_sum, n_part_sum_prev
-  integer  :: ierr, myrank, ntasks, root = 0, ix, n_its
+  integer                        :: n
+  integer                        :: n_samples
+  integer                        :: n_gas_comp
+  integer                        :: step_cntr, steps_left_fld
+  integer                        :: n_output, n_grid_adapt
+  integer                        :: WCTime_start, WCTime_current
+  integer                        :: n_part_rescale
+  integer                        :: n_part_sum, n_part_sum_prev
+  integer                        :: ierr, myrank, ntasks, root = 0, ix, n_its
+  integer                        :: rng_seed(4)
 
-  logical  :: finished, flag_output, rescale, adapt_grid
-  logical  :: use_detach, use_photoi, do_fake_attach
+  logical                        :: finished, flag_output, rescale, adapt_grid
+  logical                        :: use_detach, use_photoi, do_fake_attach
 
-  real(dp) :: max_ev
+  real(dp)                       :: max_ev
 
   ! Gas / cross sec parameters
   real(dp)                       :: pressure, temperature
@@ -58,25 +59,21 @@ program pamdi3d
   type(CS_t), allocatable        :: cross_secs(:)
 
   ! Simulation variables
-  real(dp) :: sim_time, end_time
-  real(dp) :: time_per_output, time_per_grid_adapt
-  real(dp) :: dt_fld, min_incr_rescale, prev_fld_time
-  real(dp) :: fld_err
-  real(dp) :: max_fld_err
-  real(dp) :: n_elec_sum
-  real(dp) :: dt_min, dt_max, dt, dt_next
-  real(dp) :: mean_weight
-  real(dp) :: cfl_num
+  real(dp)                       :: sim_time, end_time
+  real(dp)                       :: time_per_output, time_per_grid_adapt
+  real(dp)                       :: dt_fld, min_incr_rescale, prev_fld_time
+  real(dp)                       :: fld_err
+  real(dp)                       :: max_fld_err
+  real(dp)                       :: n_elec_sum
+  real(dp)                       :: dt_min, dt_max, dt, dt_next
+  real(dp)                       :: mean_weight
+  real(dp)                       :: cfl_num
 
-  ! Particle binning
-  real(dp)    :: bin_args(2)
-  integer     :: n_bins
+  type(CFG_t)                    :: cfg
+  type(PC_t)                     :: pc
+  type(RNG_t)                    :: rng
 
-  type(CFG_t) :: cfg
-  type(PC_t)  :: pc
-  type(RNG_t) :: rng
-
-  sim_time        = 0.0D0
+  sim_time = 0.0D0
 
   call MPI_init(ierr)
   call MPI_comm_rank(MPI_COMM_WORLD, myrank, ierr)
@@ -92,6 +89,10 @@ program pamdi3d
   if (myrank == root) then
      call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
   end if
+
+  ! Set rng seed (note: particle model has its own rng)
+  call CFG_get(cfg, "rng_seed", rng_seed)
+  call rng%set_seed(rng_seed)
 
   ! Read in the crossection data from files
   call CFG_get_size(cfg, "gas_names", n_gas_comp)
@@ -207,10 +208,6 @@ program pamdi3d
   call CFG_get(cfg, "dt_max", dt_max)
   call CFG_get(cfg, "sim_max_fld_err", max_fld_err)
   call CFG_get(cfg, "sim_min_incr_rescale", min_incr_rescale)
-
-  bin_args(1) = 0
-  bin_args(2) = 1/PD_dr(1)
-  n_bins = ceiling(PD_r_max(1) / PD_dr(1))
 
   dt_next             = dt_min
   dt_fld              = dt_min
@@ -394,6 +391,9 @@ contains
          "Whether we use background O2- in the simulation")
     call CFG_add(cfg, "sim_cfl_num", 0.5_dp, &
          "CFL number used for the particles")
+
+    call CFG_add(cfg, "rng_seed", (/521288629, 362436069, 16163801, &
+         1131199299/), "Seed for random number generator")
 
     call CFG_add(cfg, "ref_max_levels", 7, &
          "The maximum number of refinement levels in the electric field")
