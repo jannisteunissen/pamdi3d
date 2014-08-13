@@ -252,8 +252,8 @@ program pamdi3d
 
         if (myrank == root) then
            dt_fld         = get_new_dt(dt_fld, fld_err, max_fld_err)
-           dt_next        = min(dt_next, dt_fld)
-           steps_left_fld = floor(dt_fld / dt_next)
+           steps_left_fld = ceiling(dt_fld / dt_next)
+           dt_next        = dt_fld / steps_left_fld
 
            ! Centralize these flags because for heterogeneous systems
            finished    = sim_time > end_time
@@ -314,8 +314,8 @@ program pamdi3d
            call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.true.)
            call PM_adjust_weights(pc)
 
-           n_part_sum_prev = n_part_sum
            n_part_sum = PP_get_num_sim_part(pc)
+           n_part_sum_prev = n_part_sum
 
            call PM_particles_to_density(pc)
            call E_compute_field(myrank, root, sim_time)

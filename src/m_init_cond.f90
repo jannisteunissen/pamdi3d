@@ -107,16 +107,12 @@ contains
        initSeedPos = initSeedPos * PD_r_max
 
        do ll = 1, int (nIonPairs / init_weight)
-          success = .false.
-          do while (.not. success)
-             pos(1:2) = rng%two_normals()
-             pos(2:3) = rng%two_normals()
-             pos = initSeedPos + pos * radius
-             if (.not. PD_outside_domain(pos)) then
-                call PM_create_ei_pair(pc, pos, w=init_weight)
-                success = .true.
-             end if
-          end do
+          pos(1:2) = rng%two_normals()
+          pos(2:3) = rng%two_normals()
+          pos = initSeedPos + pos * radius
+          if (.not. PD_outside_domain(pos)) then
+             call PM_create_ei_pair(pc, pos, w=init_weight)
+          end if
        end do
 
     case ('laserLine')
