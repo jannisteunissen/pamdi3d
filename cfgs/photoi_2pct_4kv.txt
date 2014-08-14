@@ -1,0 +1,5 @@
+gas_fractions           = 0.98d0 0.02d0
+gas_names               = "N2" "O2"
+sim_name                = pi2_4kv_2pct
+elec_times      = 0.0d-9 1.0d-9
+elec_voltages   = 4d3 4d3
