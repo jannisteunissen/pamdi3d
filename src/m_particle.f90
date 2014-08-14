@@ -34,6 +34,7 @@ module m_particle
   public :: PM_get_max_dt
   public :: PM_bin_func
   public :: PM_adjust_weights
+  public :: PM_limit_dens
 
 contains
 
@@ -149,7 +150,7 @@ contains
     logical, intent(in) :: only_store
 
     integer :: i, n, ierr
-    real(dp) :: fld(3), fld_sum
+    real(dp) :: fld(3), this_err, avg_norm
     real(dp), allocatable, save :: pos_samples(:, :)
     real(dp), allocatable, save :: fld_samples(:, :)
 
@@ -172,13 +173,14 @@ contains
           fld_samples(:,i) = E_get_field(pos_samples(:,i))
        end do
     else
-       fld_sum = 0
+       avg_norm = norm2(fld_samples) / sqrt(1.0_dp * n_samples)
+       print *, "avg field norm", avg_norm
        do i = 1, n_samples
-          fld = E_get_field(pos_samples(:,i))
-          fld_err = max(fld_err, norm2(fld - fld_samples(:,i)))
-          fld_sum = fld_sum + norm2(fld)
+          fld      = E_get_field(pos_samples(:,i))
+          this_err = norm2(fld - fld_samples(:,i)) / &
+               max(norm2(fld), norm2(fld_samples(:,i)), avg_norm)
+          fld_err  = max(fld_err, this_err)
        end do
-       fld_err = fld_err * n_samples / fld_sum
     end if
 
     call MPI_ALLREDUCE(MPI_IN_PLACE, fld_err, 1, MPI_DOUBLE_PRECISION, &
@@ -244,4 +246,38 @@ contains
     i_bin  = max(1, i_bin)
     i_bin  = min(binner%n_bins, i_bin)
   end function PM_bin_func
+
+  ! Perform attachment of electrons to stabilize the simulation in regions with
+  ! a very high positive ion density.
+  subroutine PM_limit_dens(pc, rng, max_dens)
+    use m_units_constants
+    use m_random
+    use m_efield_amr
+    type(PC_t), intent(inout)  :: pc
+    type(RNG_t), intent(inout) :: rng
+    real(dp), intent(in)       :: max_dens
+    integer                    :: ll
+    real(dp)                   :: local_dens, convert_prob, cur_max_dens(1)
+
+    call E_get_max_of_vars((/E_i_elec/), cur_max_dens)
+    print *, "Max elec dens", cur_max_dens, max_dens
+    if (cur_max_dens(1) < max_dens) return
+
+    print *, "Artificially attaching electrons for stability"
+    do ll = 1, pc%n_part
+       local_dens = E_get_var(E_i_elec, pc%particles(ll)%x)
+
+       if (local_dens > max_dens) then
+          convert_prob = 1 - max_dens / local_dens
+          if (rng%uni_01() < convert_prob) then
+             call E_add_to_var(E_i_nion, pc%particles(ll)%x, &
+                  dble(pc%particles(ll)%w))
+             call pc%remove_part(ll)
+          end if
+       end if
+    end do
+
+    call pc%clean_up()
+  end subroutine PM_limit_dens
+
 end module m_particle

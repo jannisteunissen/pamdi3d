@@ -498,8 +498,8 @@ contains
 
     n_points = product(amr_grid%Nr)
     do ix = 1, size(v_ixs)
-       call MPI_BCAST(amr_grid%vars(:, :, :, v_ixs(ix)), n_points, MPI_DOUBLE_PRECISION, &
-            root, MPI_COMM_WORLD, ierr)
+       call MPI_BCAST(amr_grid%vars(:, :, :, v_ixs(ix)), n_points, &
+            MPI_DOUBLE_PRECISION, root, MPI_COMM_WORLD, ierr)
     end do
 
     do nc = 1, amr_grid%n_child

@@ -48,7 +48,7 @@ program pamdi3d
   integer                        :: rng_seed(4)
 
   logical                        :: finished, flag_output, rescale, adapt_grid
-  logical                        :: use_detach, use_photoi, do_fake_attach
+  logical                        :: use_detach, use_photoi, limit_dens
 
   real(dp)                       :: max_ev
 
@@ -68,6 +68,7 @@ program pamdi3d
   real(dp)                       :: dt_min, dt_max, dt, dt_next
   real(dp)                       :: mean_weight
   real(dp)                       :: cfl_num
+  real(dp)                       :: max_density
 
   type(CFG_t)                    :: cfg
   type(PC_t)                     :: pc
@@ -115,7 +116,7 @@ program pamdi3d
 
   if (myrank == root) print *, "Reading crossection data"
   do n = 1, n_gas_comp
-     call CS_add_from_file("input/" // gas_files(n), gas_names(n), 1.0_dp, &
+     call CS_add_from_file("input/" // gas_files(n), gas_names(n), &
           gas_fracs(n) * GAS_get_number_dens(), max_ev, cross_secs)
   end do
 
@@ -208,10 +209,11 @@ program pamdi3d
   call CFG_get(cfg, "dt_max", dt_max)
   call CFG_get(cfg, "sim_max_fld_err", max_fld_err)
   call CFG_get(cfg, "sim_min_incr_rescale", min_incr_rescale)
+  call CFG_get(cfg, "sim_max_density", max_density)
 
-  dt_next             = dt_min
-  dt_fld              = dt_min
-  do_fake_attach      = .true.
+  dt_next    = dt_min
+  dt_fld     = dt_min
+  limit_dens = .true.
 
   if (myrank == root) then
      print *, "Starting simulation with name ", trim(sim_name), ","
@@ -295,11 +297,10 @@ program pamdi3d
         if (adapt_grid .or. rescale) then
            call E_share_vars((/E_i_elec/), root)
 
-           if (myrank == root) print *, "TODO fake attachments?"
-           ! if (do_fake_attach) then
-           !    if (myrank == root) print *, "Performing fake attachments!"
-           !    call PM_convertElecForStability(dt_fld, 0.2d0)
-           ! end if
+           if (limit_dens) then
+              if (myrank == root) print *, "Limiting density"
+              call PM_limit_dens(pc, rng, max_density)
+           end if
 
            ! TODO: The above call modifies the electron density slightly,
            ! probably not very important but check it later.
@@ -391,6 +392,8 @@ contains
          "Whether we use background O2- in the simulation")
     call CFG_add(cfg, "sim_cfl_num", 0.5_dp, &
          "CFL number used for the particles")
+    call CFG_add(cfg, "sim_max_density", 1.0e21_dp, &
+         "Maximum electron density; above this they are converted to ions")
 
     call CFG_add(cfg, "rng_seed", (/521288629, 362436069, 16163801, &
          1131199299/), "Seed for random number generator")
