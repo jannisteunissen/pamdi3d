@@ -1532,6 +1532,7 @@ ZDPLASKIN: O2+O2->O2^-+O2
 COMMENT: 3-body attachment :3 body attachment cross section are normalized to gas density in units of cm-3. That is ,
 the rate for 3 body attachment should be multiplied by gas density in units of cm-3 before use.
 UPDATED: 2010-06-04 10:18:27
+TIMES_N: CM3
 ------------------------------------------------------------
  0.0000e+0	 0.0000e+0
  5.8000e-2	 0.0000e+0
