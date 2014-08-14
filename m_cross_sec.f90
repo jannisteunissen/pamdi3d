@@ -63,21 +63,23 @@ module m_cross_sec
 contains
 
   ! Search 'filename' for cross section data concerning 'gas_name'
-  subroutine CS_add_from_file(filename, gas_name, x_normalization, &
-       y_normalization, req_energy, cross_secs)
+  subroutine CS_add_from_file(filename, gas_name, number_dens, &
+       req_energy, cross_secs)
     use m_units_constants
-    character(len=*), intent(IN) :: gas_name, filename
-    real(dp), intent(in)         :: x_normalization, y_normalization
-    real(dp), intent(in)         :: req_energy
+    character(len=*), intent(IN)           :: filename, gas_name
+    real(dp), intent(in)                   :: number_dens
+    real(dp), intent(in)                   :: req_energy
     type(CS_t), intent(inout), allocatable :: cross_secs(:)
+
     type(CS_t), allocatable :: cs_cpy(:)
-    type(CS_t) :: cs_buf(max_num_cols_per_gas)
-    integer                      :: n, cIx, nL, n_rows, col_type
-    integer                      :: my_unit, io_state, len_gas_name
-    character(LEN=name_len)      :: lineFMT
-    character(LEN=line_len)      :: line, prev_line
-    real(dp)                     :: tempArray(2, max_num_rows)
-    real(dp)                     :: x_scaling, y_scaling, tmp_value
+    type(CS_t)              :: cs_buf(max_num_cols_per_gas)
+    integer                 :: n, cIx, nL, n_rows, col_type
+    integer                 :: my_unit, io_state, len_gas_name
+    character(LEN=name_len) :: lineFMT, unit_string
+    character(LEN=line_len) :: line, prev_line
+    real(dp)                :: tempArray(2, max_num_rows)
+    real(dp)                :: x_scaling, y_scaling, tmp_value
+    real(dp)                :: two_reals(2)
 
     my_unit      = 333
     nL           = 0 ! Set the number of lines to 0
@@ -99,6 +101,7 @@ contains
     !     COMMENT: total attachment     [possibly comments]
     !     UPDATED: 2010-06-24 15:04:36
     !     SCALING: 1.0 1.0              [optionally scale factors for the columns]
+    !     TIMES_N: CM3 (or M3)          [optional; multiply with gas number dens, for 3-body processes]
     !     ------------------            [at least 5 dashes]
     !     xxx   xxx                     [cross section data in two column format]
     !     ...   ...
@@ -184,8 +187,21 @@ contains
                   trim(adjustl(line(11:))) // "]"
           else if ( line(1:7) == "COMMENT") then
              cs_buf(cIx)%comment = line
+          else if ( line(1:7) == "TIMES_N") then
+             read(line(9:), *) unit_string
+             if (unit_string == "CM3") then
+                y_scaling = y_scaling * number_dens * 1.0e-6_dp
+             else if (unit_string == "M3") then
+                y_scaling = y_scaling * number_dens
+             else
+                print *, "TIMES_N: statement followed by wrong symbol"
+                print *, "Allowed are CM3 and M3"
+                go to 999
+             end if
           else if ( line(1:7) == "SCALING") then
-             read(line(9:), *) x_scaling, y_scaling
+             read(line(9:), *) two_reals
+             x_scaling = x_scaling * two_reals(1)
+             y_scaling = y_scaling * two_reals(2)
           else if ( line(1:5) == "-----" ) then
              exit
           end if
@@ -219,8 +235,8 @@ contains
        ! Store the data in the actual table
        allocate(cs_buf(cIx)%en_cs(2, n_rows))
        cs_buf(cIx)%n_rows = n_rows
-       cs_buf(cIx)%en_cs(1,:) = tempArray(1, 1:n_rows) * x_normalization * x_scaling
-       cs_buf(cIx)%en_cs(2,:) = tempArray(2, 1:n_rows) * y_normalization * y_scaling
+       cs_buf(cIx)%en_cs(1,:) = tempArray(1, 1:n_rows) * x_scaling
+       cs_buf(cIx)%en_cs(2,:) = tempArray(2, 1:n_rows) * number_dens * y_scaling
        cs_buf(cIx)%max_energy = cs_buf(cIx)%en_cs(1, n_rows)
 
        ! Locate minimum energy (first value followed by non-zero cross sec)

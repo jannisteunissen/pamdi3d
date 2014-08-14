@@ -35,7 +35,7 @@ program test_m_particle_core
   ! distribution
   print *, "Reading in cross sections from ", trim(cs_file)
   call CS_add_from_file(cs_file, gas_name, 1.0_dp, neutral_dens, &
-       1.0e3_dp, cross_secs)
+       cross_secs)
 
   ! All cross sections should be constant, simply take the first value
   norm_cross_sec = 0

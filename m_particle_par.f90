@@ -112,7 +112,7 @@ contains
     integer, allocatable        :: n_part_per_bin(:), ix_list(:)
     real(dp), allocatable       :: bin_ixs(:)
 
-    print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
+    ! print *, "Before divide ", myrank, " has ", pc%n_part, " particles"
 
     ! Get the number of particles each task has
     call MPI_ALLGATHER(pc%n_part, 1, MPI_integer, n_part_task, 1, &
@@ -216,7 +216,7 @@ contains
 
     ! print *, "After divide ", myrank, " has ", pc%n_part, "pc%n_part (some dead)"
     call pc%clean_up()
-    print *, "After divide ", myrank, " has ", pc%n_part, " particles"
+    ! print *, "After divide ", myrank, " has ", pc%n_part, " particles"
   end subroutine PP_reorder_by_bins_mpi
 
   subroutine send_parts_mpi(parts, recver, tag)

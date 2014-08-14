@@ -883,8 +883,7 @@ contains
     already_merged = .false.
     n_too_far      = 0
 
-    print *, "num_merge", num_merge
-
+    ! print *, "num_merge", num_merge
     ! Sort particles by their relative weight
     call mrgrnk(weight_ratios, part_ixs)
 
@@ -930,7 +929,7 @@ contains
 
     ! Split particles.
     num_split = count(weight_ratios >= large_ratio)
-    print *, "num_split:", num_split
+    ! print *, "num_split:", num_split
 
     do ix = num_part - num_split + 1, num_part
        ! Change part_copy(ix), then add an extra particle at then end of pl
