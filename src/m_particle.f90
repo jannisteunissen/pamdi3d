@@ -174,7 +174,7 @@ contains
        end do
     else
        avg_norm = norm2(fld_samples) / sqrt(1.0_dp * n_samples)
-       print *, "avg field norm", avg_norm
+
        do i = 1, n_samples
           fld      = E_get_field(pos_samples(:,i))
           this_err = norm2(fld - fld_samples(:,i)) / &
