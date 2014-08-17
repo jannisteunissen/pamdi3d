@@ -218,6 +218,12 @@ contains
     allocate(velocities(n_samples))
     allocate(ix_list(n_samples))
 
+    if (pc%n_part == 0) then
+       print *, "No particles, dt_max = 1.0e-12"
+       dt_max = 1.0e-12_dp
+       return
+    end if
+
     ! Estimate maximum velocity of particles
     do n = 1, n_samples
        ix = rng%int_ab(1, pc%n_part)
