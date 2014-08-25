@@ -1,5 +1,7 @@
 Compilation:
 
+$ git submodule init
+$ git submodule update
 $ make
 
 Running (sequential):
