@@ -1,10 +1,10 @@
-SRC_DIRS	:= src
+SRC_DIRS	:= src fosito particle_core
 CREATE_DIRS	:= output
 
 # Directories with altered names (useful for cleaning)
 CLEANSRC	:= $(SRC_DIRS:%=clean-%)
 
-.PHONY:	all clean $(SRC_DIRS) $(CLEANSRC)
+.PHONY:	all clean $(SRC_DIRS) $(CLEANSRC) $(SUBMODULES)
 
 all: 		$(SRC_DIRS) | $(CREATE_DIRS)
 
@@ -17,9 +17,11 @@ $(CREATE_DIRS):
 $(CLEANSRC):
 		$(MAKE) -C $(@:clean-%=%) clean
 
-# Dependecy information
-$(SRC_DIRS):	| pamdi3d_libs
-
 pamdi3d_libs:
 	tar -xzf pamdi3d_libs.tar.gz
 	make -C pamdi3d_libs all
+
+# Dependecy information
+$(SRC_DIRS):	| pamdi3d_libs
+src:		fosito particle_core
+particle_core: 	fosito

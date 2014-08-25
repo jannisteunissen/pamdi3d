@@ -1,0 +1,6 @@
+[submodule "fosito"]
+	path = fosito
+	url = https://github.com/jannisteunissen/fosito.git
+[submodule "particle_core"]
+	path = particle_core
+	url = https://github.com/jannisteunissen/particle_core.git
