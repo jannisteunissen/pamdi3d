@@ -392,7 +392,7 @@ contains
          "Whether we use background O2- in the simulation")
     call CFG_add(cfg, "sim_cfl_num", 0.5_dp, &
          "CFL number used for the particles")
-    call CFG_add(cfg, "sim_max_density", 1.0e21_dp, &
+    call CFG_add(cfg, "sim_max_density", 2.5e21_dp, &
          "Maximum electron density; above this they are converted to ions")
 
     call CFG_add(cfg, "rng_seed", (/521288629, 362436069, 16163801, &
