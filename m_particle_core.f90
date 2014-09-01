@@ -727,12 +727,12 @@ contains
     procedure(p_to_r_f)    :: sort_func
 
     integer                      :: ix, n_part
-    integer, allocatable         :: part_ixs(:)
+    integer, allocatable         :: sorted_ixs(:)
     real(dp), allocatable        :: part_values(:)
     type(PC_part_t), allocatable :: part_copies(:)
 
     n_part = self%n_part
-    allocate(part_ixs(n_part))
+    allocate(sorted_ixs(n_part))
     allocate(part_values(n_part))
     allocate(part_copies(n_part))
 
@@ -741,10 +741,10 @@ contains
        part_values(ix) = sort_func(part_copies(ix))
     end do
 
-    call mrgrnk(part_values, part_ixs)
+    call mrgrnk(part_values, sorted_ixs)
 
     do ix = 1, n_part
-       self%particles(ix) = part_copies(part_ixs(ix))
+       self%particles(ix) = part_copies(sorted_ixs(ix))
     end do
   end subroutine sort
 
@@ -765,7 +765,7 @@ contains
     real(dp), intent(in)        :: filter_args(:)
 
     integer                     :: ix, p_ix, o_ix, n_used, num_bins, n_part
-    integer, allocatable        :: part_ixs(:)
+    integer, allocatable        :: sorted_ixs(:)
     real(dp)                    :: boundary_value
     real(dp), allocatable       :: part_values(:)
     logical, allocatable        :: part_mask(:)
@@ -779,7 +779,7 @@ contains
     n_used = count(part_mask)
 
     allocate(part_values(n_used))
-    allocate(part_ixs(n_used))
+    allocate(sorted_ixs(n_used))
 
     p_ix = 0
     do ix = 1, self%n_part
@@ -789,7 +789,7 @@ contains
        end if
     end do
 
-    call mrgrnk(part_values, part_ixs)
+    call mrgrnk(part_values, sorted_ixs)
 
     num_bins = size(x_values)
     p_ix     = 1
@@ -799,7 +799,7 @@ contains
        boundary_value = 0.5_dp * (x_values(ix) + x_values(ix+1))
        do
           if (p_ix == n_used + 1) exit outer
-          o_ix = part_ixs(p_ix) ! Index in the 'old' list
+          o_ix = sorted_ixs(p_ix) ! Index in the 'old' list
           if (part_values(o_ix) > boundary_value) exit
 
           y_values(ix) = y_values(ix) + self%particles(o_ix)%w
@@ -808,7 +808,7 @@ contains
     end do outer
 
     ! Fill last bin
-    y_values(num_bins) = sum(self%particles(part_ixs(p_ix:n_used))%w)
+    y_values(num_bins) = sum(self%particles(sorted_ixs(p_ix:n_used))%w)
   end subroutine histogram
 
   ! Routine to merge and split particles. Input arguments are the coordinate
@@ -834,38 +834,42 @@ contains
          type(RNG_t), intent(inout)   :: rng
        end subroutine pptr_merge
 
-       subroutine pptr_split(part_a, part_out, rng)
+       subroutine pptr_split(part_a, w_ratio, part_out, n_part_out, rng)
          import
-         type(PC_part_t), intent(in)  :: part_a
-         type(PC_part_t), intent(inout) :: part_out(2)
-         type(RNG_t), intent(inout)   :: rng
+         type(PC_part_t), intent(in)    :: part_a
+         real(dp), intent(in)           :: w_ratio
+         type(PC_part_t), intent(inout) :: part_out(:)
+         integer, intent(inout)         :: n_part_out
+         type(RNG_t), intent(inout)     :: rng
        end subroutine pptr_split
     end interface
 
-    procedure(p_to_r_f)          :: weight_func
+    procedure(p_to_r_f)    :: weight_func
 
-    integer, parameter           :: num_neighbors = 1
-    real(dp), parameter          :: large_ratio   = 1.5_dp
-    real(dp), parameter          :: small_ratio   = 1 / large_ratio
-    type(kdtree2), pointer       :: kd_tree
-    type(kdtree2_result)         :: kd_results(num_neighbors)
+    integer, parameter     :: num_neighbors  = 1
+    integer, parameter     :: n_part_out_max = 16
+    real(dp), parameter    :: large_ratio    = 1.5_dp
+    real(dp), parameter    :: small_ratio    = 1 / large_ratio
+    type(kdtree2), pointer :: kd_tree
+    type(kdtree2_result)   :: kd_results(num_neighbors)
 
-    integer                      :: n_x_coord, n_coords
-    integer                      :: num_part, num_merge, num_split
-    integer                      :: p_min, p_max, n_too_far
-    integer                      :: o_ix, o_nn_ix
-    integer                      :: ix, neighbor_ix
-    logical, allocatable         :: already_merged(:)
-    integer, allocatable         :: part_ixs(:), coord_ixs(:)
-    real(dp), allocatable        :: coord_data(:, :), weight_ratios(:)
-    type(PC_part_t)              :: part_out(2)
+    integer               :: n_x_coord, n_coords
+    integer               :: num_part, num_merge, num_split
+    integer               :: p_min, p_max, n_too_far
+    integer               :: o_ix, o_nn_ix
+    integer               :: i, ix, neighbor_ix
+    integer               :: n_part_out
+    logical, allocatable  :: already_merged(:)
+    integer, allocatable  :: sorted_ixs(:), coord_ixs(:)
+    real(dp), allocatable :: coord_data(:, :), weight_ratios(:)
+    type(PC_part_t)       :: part_out(n_part_out_max)
 
-    p_min    = 1
-    p_max    = self%n_part
-    num_part = p_max - p_min + 1
+    p_min                                    = 1
+    p_max                                    = self%n_part
+    num_part                                 = p_max - p_min + 1
 
     allocate(weight_ratios(num_part))
-    allocate(part_ixs(num_part))
+    allocate(sorted_ixs(num_part))
 
     do ix = 1, num_part
        weight_ratios(ix) = self%particles(p_min+ix-1)%w / &
@@ -885,12 +889,12 @@ contains
 
     ! print *, "num_merge", num_merge
     ! Sort particles by their relative weight
-    call mrgrnk(weight_ratios, part_ixs)
+    call mrgrnk(weight_ratios, sorted_ixs)
 
     ! Only create a k-d tree if there are enough particles to be merged
     if (num_merge > n_coords) then
        do ix = 1, num_merge
-          o_ix = part_ixs(ix)
+          o_ix = sorted_ixs(ix)
           coord_data(1:n_x_coord, ix) = pack(self%particles(o_ix)%x, x_mask)
           if (use_v_norm) then
              coord_data(n_x_coord+1, ix) = v_fac * norm2(self%particles(o_ix)%v)
@@ -913,8 +917,8 @@ contains
           if (already_merged(neighbor_ix)) cycle
 
           ! Get indices in the original particle list
-          o_ix = part_ixs(ix)
-          o_nn_ix = part_ixs(neighbor_ix)
+          o_ix = sorted_ixs(ix)
+          o_nn_ix = sorted_ixs(neighbor_ix)
 
           ! Merge, then remove neighbor
           call pptr_merge(self%particles(o_ix), self%particles(o_nn_ix), &
@@ -932,11 +936,13 @@ contains
     ! print *, "num_split:", num_split
 
     do ix = num_part - num_split + 1, num_part
-       ! Change part_copy(ix), then add an extra particle at then end of pl
-       o_ix = part_ixs(ix)
-       call pptr_split(self%particles(o_ix), part_out(1:2), self%rng)
+       o_ix = sorted_ixs(ix)
+       call pptr_split(self%particles(o_ix), weight_ratios(o_ix), part_out, &
+            n_part_out, self%rng)
        self%particles(o_ix) = part_out(1)
-       call self%add_part(part_out(2))
+       do i = 2, n_part_out
+          call self%add_part(part_out(i))
+       end do
     end do
 
     ! print *, "clean up"
@@ -963,11 +969,14 @@ contains
     part_out%w = part_a%w + part_b%w
   end subroutine PC_merge_part_rxv
 
-  subroutine PC_split_part(part_a, part_out, rng)
+  subroutine PC_split_part(part_a, w_ratio, part_out, n_part_out, rng)
     type(PC_part_t), intent(in)    :: part_a
-    type(PC_part_t), intent(inout) :: part_out(2)
+    real(dp), intent(in)           :: w_ratio
+    type(PC_part_t), intent(inout) :: part_out(:)
+    integer, intent(inout)         :: n_part_out
     type(RNG_t), intent(inout)     :: rng
 
+    n_part_out    = 2
     part_out(1)   = part_a
     part_out(1)%w = 0.5_dp * part_out(1)%w
     part_out(2)   = part_out(1)
