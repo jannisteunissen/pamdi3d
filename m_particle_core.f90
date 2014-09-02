@@ -165,6 +165,7 @@ contains
 
     call self%rng%set_seed((/1, 3, 3, 1337/))
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
+    print *, "Max coll rate", self%max_rate, self%inv_max_rate
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
@@ -239,8 +240,6 @@ contains
     call self%clean_up()
   end subroutine advance
 
-  !> Perform a collision for an electron, either elastic, excitation, ionizationCollision,
-  !! attachment or null.
   subroutine move_and_collide(self, ll)
     use m_cross_sec
     class(PC_t), intent(inout) :: self
@@ -278,18 +277,20 @@ contains
 
           select case (cType)
           case (CS_attach_t)
-             call attach_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), self%rng)
+             call attach_collision(self%particles(ll), part_out, &
+                  n_part_out, self%colls(cIx), self%rng)
              go to 100 ! Particle is removed, so exit
           case (CS_elastic_t)
-             call elastic_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), self%rng)
+             call elastic_collision(self%particles(ll), part_out, &
+                  n_part_out, self%colls(cIx), self%rng)
           case (CS_excite_t)
-             call excite_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), self%rng)
+             call excite_collision(self%particles(ll), part_out, &
+                  n_part_out, self%colls(cIx), self%rng)
           case (CS_ionize_t)
-             call ionization_collision(self%particles(ll), part_out, n_part_out, &
-                  self%colls(cIx), self%rng)
+             call ionization_collision(self%particles(ll), part_out, &
+                  n_part_out, self%colls(cIx), self%rng)
+          case default
+             stop "Wrong collision type"
           end select
 
           ! Store the particles returned. The first one goes at location ll, the
@@ -330,12 +331,8 @@ contains
 
     ! Fill an array with interpolated rates
     buffer(1:n_colls) = LT_get_mcol(rate_lt, velocity)
-
-    ! Get a random collision frequency
-    rand_rate = rand_unif * max_rate
-
-    ! Determine the type of collision by finding the index in the list
-    get_coll_index = FI_adaptive_r(buffer(1:n_colls), rand_rate)
+    rand_rate         = rand_unif * max_rate
+    get_coll_index    = FI_adaptive_r(buffer(1:n_colls), rand_rate)
 
     ! If there was no collision, the index exceeds the list and is set to 0
     if (get_coll_index == n_colls+1) get_coll_index = 0
@@ -385,7 +382,7 @@ contains
     energy  = max(0.0_dp, old_en - coll%en_loss)
     new_vel = PC_en_to_vel(energy, coll%part_mass)
 
-    n_part_out = 1
+    n_part_out  = 1
     part_out(1) = part_in
     call scatter_isotropic(part_out(1), new_vel, rng)
   end subroutine excite_collision
@@ -401,11 +398,11 @@ contains
 
     real(dp)                       :: energy, old_en, velocity
 
-    old_en     = PC_v_to_en(part_in%v, coll%part_mass)
-    energy     = max(0.0_dp, old_en - coll%en_loss)
-    velocity  = PC_en_to_vel(0.5_dp * energy, coll%part_mass)
+    old_en      = PC_v_to_en(part_in%v, coll%part_mass)
+    energy      = max(0.0_dp, old_en - coll%en_loss)
+    velocity    = PC_en_to_vel(0.5_dp * energy, coll%part_mass)
 
-    n_part_out = 2
+    n_part_out  = 2
     part_out(1) = part_in
     part_out(2) = part_in
     call scatter_isotropic(part_out(1), velocity, rng)
@@ -672,25 +669,23 @@ contains
   end subroutine check_space
 
   !> Create a lookup table with cross sections for a number of energies
-  subroutine set_coll_rates(self, cross_secs, mass, max_eV, table_size)
+  subroutine set_coll_rates(self, cross_secs, mass, max_ev, table_size)
     use m_units_constants
     use m_cross_sec
     use m_lookup_table
     class(PC_t), intent(inout) :: self
-    type(CS_t), intent(in) :: cross_secs(:)
-    integer, intent(in)       :: table_size
-    real(dp), intent(in)      :: mass, max_eV
+    type(CS_t), intent(in)     :: cross_secs(:)
+    integer, intent(in)        :: table_size
+    real(dp), intent(in)       :: mass, max_ev
 
     real(dp)                  :: vel_list(table_size), rate_list(table_size)
     real(dp)                  :: sum_rate_list(table_size)
     integer                   :: ix, i_c, i_row, n_colls
     real(dp)                  :: max_vel, en_eV
 
-    max_vel = PC_en_to_vel(max_eV * UC_elec_volt, mass)
-
-    n_colls = size(cross_secs)
+    max_vel      = PC_en_to_vel(max_ev * UC_elec_volt, mass)
+    n_colls      = size(cross_secs)
     self%n_colls = n_colls
-
     allocate(self%colls(n_colls))
 
     ! Set a range of velocities
@@ -724,7 +719,7 @@ contains
   subroutine sort(self, sort_func)
     use m_mrgrnk
     class(PC_t), intent(inout)   :: self
-    procedure(p_to_r_f)    :: sort_func
+    procedure(p_to_r_f)          :: sort_func
 
     integer                      :: ix, n_part
     integer, allocatable         :: sorted_ixs(:)

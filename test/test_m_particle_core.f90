@@ -34,7 +34,7 @@ program test_m_particle_core
   ! Use constant momentum transfer cross section, so that we get a Druyvesteyn
   ! distribution
   print *, "Reading in cross sections from ", trim(cs_file)
-  call CS_add_from_file(cs_file, gas_name, 1.0_dp, neutral_dens, &
+  call CS_add_from_file(cs_file, gas_name, neutral_dens, max_en_eV, &
        cross_secs)
 
   ! All cross sections should be constant, simply take the first value
