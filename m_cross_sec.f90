@@ -165,10 +165,9 @@ contains
        select case(col_type)
        case (CS_elastic_t)
           cs_buf(cIx)%coll%rel_mass = tmp_value ! Store relative mass e/M
-       case (CS_excite_t)
-          cs_buf(cIx)%coll%en_loss  = tmp_value ! Energy loss
-       case (CS_ionize_t)
-          cs_buf(cIx)%coll%en_loss  = tmp_value ! Energy loss
+       case (CS_excite_t, CS_ionize_t)
+          ! Energy loss in Joule
+          cs_buf(cIx)%coll%en_loss  = tmp_value * UC_elec_volt
        end select
 
        cs_buf(cIx)%gas_name = gas_name
@@ -189,6 +188,7 @@ contains
              cs_buf(cIx)%comment = line
           else if ( line(1:7) == "TIMES_N") then
              read(line(9:), *) unit_string
+             unit_string = adjustl(unit_string)
              if (unit_string == "CM3") then
                 y_scaling = y_scaling * number_dens * 1.0e-6_dp
              else if (unit_string == "M3") then
@@ -234,7 +234,7 @@ contains
 
        ! Store the data in the actual table
        allocate(cs_buf(cIx)%en_cs(2, n_rows))
-       cs_buf(cIx)%n_rows = n_rows
+       cs_buf(cIx)%n_rows     = n_rows
        cs_buf(cIx)%en_cs(1,:) = tempArray(1, 1:n_rows) * x_scaling
        cs_buf(cIx)%en_cs(2,:) = tempArray(2, 1:n_rows) * number_dens * y_scaling
        cs_buf(cIx)%max_energy = cs_buf(cIx)%en_cs(1, n_rows)
@@ -264,7 +264,9 @@ contains
        if ( cs_buf(cIx)%en_cs(1, n_rows) < req_energy .and. &
             & cs_buf(cIx)%en_cs(2, n_rows) > 0.0D0 ) then
           print *, "CS_read_file error: cross section data at line ", nL, &
-               " does not go up to high enough x-values (energy)"
+               " does not go up to high enough x-values (energy)."
+          print *, "Required: ", req_energy, "found: ", &
+               cs_buf(cIx)%en_cs(1, n_rows)
           stop
        end if
 
