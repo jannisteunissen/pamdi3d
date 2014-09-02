@@ -46,6 +46,7 @@ module m_particle_core
      integer, allocatable         :: attachment_colls(:)
      type(LT_table_t)             :: rate_lt
      real(dp)                     :: max_rate, inv_max_rate
+     real(dp)                     :: max_ev, max_vel
      type(LL_int_head_t)          :: clean_list
      real(dp)                     :: mass
      type(RNG_t)                  :: rng
@@ -145,13 +146,13 @@ contains
 
   !> Initialization routine for the particle module
   subroutine initialize(self, mass, cross_secs, lookup_table_size, &
-       max_en_eV, n_part_max)
+       max_ev, n_part_max)
     use m_cross_sec
     use m_units_constants
     class(PC_t), intent(inout) :: self
     type(CS_t), intent(in)     :: cross_secs(:)
     integer, intent(in)        :: lookup_table_size
-    real(dp), intent(in)       :: mass, max_en_eV
+    real(dp), intent(in)       :: mass, max_ev
     integer, intent(in)        :: n_part_max
 
     if (size(cross_secs) < 1) then
@@ -162,9 +163,11 @@ contains
     allocate(self%particles(n_part_max))
     self%mass   = mass
     self%n_part = 0
+    self%max_ev = max_ev
+    self%max_vel = PC_en_to_vel(max_ev * UC_elec_volt, mass)
 
     call self%rng%set_seed((/1, 3, 3, 1337/))
-    call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
+    call self%set_coll_rates(cross_secs, mass, max_ev, lookup_table_size)
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
@@ -239,8 +242,6 @@ contains
     call self%clean_up()
   end subroutine advance
 
-  !> Perform a collision for an electron, either elastic, excitation, ionizationCollision,
-  !! attachment or null.
   subroutine move_and_collide(self, ll)
     use m_cross_sec
     class(PC_t), intent(inout) :: self
@@ -258,6 +259,13 @@ contains
        ! Set x,v at the collision time
        call advance_particle(self%particles(ll), coll_time)
 
+       new_vel = norm2(self%particles(ll)%v)
+
+       if (new_vel > self%max_vel) then
+          call self%remove_part(ll)
+          go to 100
+       end if
+
        if (associated(self%outside_check)) then
           if (self%outside_check(self%particles(ll))) then
              call self%remove_part(ll)
@@ -265,8 +273,7 @@ contains
           end if
        end if
 
-       new_vel = norm2(self%particles(ll)%v)
-       cIx     = get_coll_index(self%rate_lt, self%n_colls, self%max_rate, &
+       cIx = get_coll_index(self%rate_lt, self%n_colls, self%max_rate, &
             new_vel, self%rng%uni_01())
 
        if (cIx > 0) then
