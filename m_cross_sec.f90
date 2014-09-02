@@ -257,10 +257,10 @@ contains
           end if
        end do
 
-       ! Check whether the tables that have been read in go up to high enough energies for our
-       ! simulation. They can also have 0.0 as their highest listed cross section, in which
-       ! case we assume the cross section is 0.0 for all higher energies
-
+       ! Check whether the tables that have been read in go up to high enough
+       ! energies for our simulation. They can also have 0.0 as their highest
+       ! listed cross section, in which case we assume the cross section is 0.0
+       ! for all higher energies
        if ( cs_buf(cIx)%en_cs(1, n_rows) < req_energy .and. &
             & cs_buf(cIx)%en_cs(2, n_rows) > 0.0D0 ) then
           print *, "CS_read_file error: cross section data at line ", nL, &
@@ -280,6 +280,12 @@ contains
 
 666 continue ! Routine ends here if the end of "filename" is reached correctly
     close(my_unit, ERR = 999, IOSTAT = io_state)
+
+    if (cIx == 0) then
+       print *, "No cross sections found while searching [", &
+            trim(gas_name), "] in [", trim(filename), "]"
+       stop
+    end if
 
     ! Set the output data
     if (allocated(cross_secs)) then
