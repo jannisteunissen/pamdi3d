@@ -1023,34 +1023,33 @@ contains
   subroutine get_coeffs(self, coeff_data, coeff_names, n_coeffs)
     use m_cross_sec
     use m_lookup_table
-    class(PC_t), intent(in) :: self
-    real(dp), intent(out), allocatable          :: coeff_data(:,:)
+    class(PC_t), intent(in)                    :: self
+    real(dp), intent(out), allocatable         :: coeff_data(:,:)
     character(len=*), intent(out), allocatable :: coeff_names(:)
-    integer, intent(out)                        :: n_coeffs
-    type(CS_coll_t), allocatable :: coll_data(:)
-    integer                                     :: nn, n_rows
+    integer, intent(out)                       :: n_coeffs
+    type(CS_coll_t), allocatable               :: coll_data(:)
+    integer                                    :: nn, n_rows
 
     call self%get_colls(coll_data)
-    n_coeffs = self%n_colls + 2
+    n_coeffs = self%n_colls + 1
     n_rows = LT_get_num_rows(self%rate_lt)
     allocate(coeff_data(n_coeffs, n_rows))
     allocate(coeff_names(n_coeffs))
 
-    call LT_get_data(self%rate_lt, coeff_data(1, :), coeff_data(3:,:))
+    call LT_get_data(self%rate_lt, coeff_data(1, :), coeff_data(2:,:))
     coeff_names(1) = "velocity (m/s)"
-    coeff_names(2) = "sum coll_rate (1/s)"
     do nn = 1, self%n_colls
        select case (self%colls(nn)%type)
        case (CS_ionize_t)
-          coeff_names(2+nn) = "ionization"
+          coeff_names(1+nn) = "ionization"
        case (CS_attach_t)
-          coeff_names(2+nn) = "attachment"
+          coeff_names(1+nn) = "attachment"
        case (CS_elastic_t)
-          coeff_names(2+nn) = "elastic"
+          coeff_names(1+nn) = "elastic"
        case (CS_excite_t)
-          coeff_names(2+nn) = "excitation"
+          coeff_names(1+nn) = "excitation"
        case default
-          coeff_names(2+nn) = "unknown"
+          coeff_names(1+nn) = "unknown"
        end select
     end do
   end subroutine get_coeffs
