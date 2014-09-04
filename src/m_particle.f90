@@ -127,7 +127,7 @@ contains
   subroutine PM_adjust_weights(pc)
     type(PC_t), intent(inout) :: pc
     call pc%merge_and_split((/.true., .true., .true./), PM_v_rel_weight, &
-         .true., weight_func, PC_merge_part_rxv, PC_split_part)
+         .true., weight_func, PC_merge_part_rxv, split_part)
   end subroutine PM_adjust_weights
 
   function weight_func(my_part) result(weight)
@@ -264,17 +264,19 @@ contains
     real(dp), intent(in)       :: max_dens
     integer                    :: ll
     real(dp)                   :: local_dens, convert_prob, cur_max_dens(1)
+    real(dp), parameter        :: convert_frac = 0.1_dp ! 10% converted per call
 
     call E_get_max_of_vars((/E_i_elec/), cur_max_dens)
-    print *, "Max elec dens", cur_max_dens, max_dens
     if (cur_max_dens(1) < max_dens) return
 
     print *, "Artificially attaching electrons for stability"
+    print *, "Max elec dens", cur_max_dens, max_dens
     do ll = 1, pc%n_part
        local_dens = E_get_var(E_i_elec, pc%particles(ll)%x)
 
        if (local_dens > max_dens) then
           convert_prob = 1 - max_dens / local_dens
+          convert_prob = convert_prob * convert_frac
           if (rng%uni_01() < convert_prob) then
              call E_add_to_var(E_i_nion, pc%particles(ll)%x, &
                   dble(pc%particles(ll)%w))
@@ -285,5 +287,32 @@ contains
 
     call pc%clean_up()
   end subroutine PM_limit_dens
+
+  subroutine split_part(part_a, w_ratio, part_out, n_part_out, rng)
+    use m_random
+    use m_efield_amr
+    type(PC_part_t), intent(in)    :: part_a
+    real(dp), intent(in)           :: w_ratio ! Current w / desired w
+    type(PC_part_t), intent(inout) :: part_out(:)
+    integer, intent(inout)         :: n_part_out
+    type(RNG_t), intent(inout)     :: rng
+
+    integer                        :: ix
+    real(dp)                       :: dr(3), diff_dr
+
+    ! The idea here is that each particle occupies a volume product(dr) /
+    ! part_per_cell. The split-up particles are distributed over this volume.
+    dr         = E_get_dr(part_a%x)
+    diff_dr    = dr(1) / PM_part_per_cell**(1.0_dp/3.0_dp)
+    n_part_out = min(nint(w_ratio), size(part_out))
+
+    do ix = 1, n_part_out
+       part_out(ix)   = part_a
+       part_out(ix)%w = part_a%w / n_part_out
+       part_out(ix)%x = part_out(ix)%x + &
+            (/rng%uni_ab(-0.5_dp, 0.5_dp), rng%uni_ab(-0.5_dp, 0.5_dp), &
+            rng%uni_ab(-0.5_dp, 0.5_dp)/) * diff_dr
+    end do
+  end subroutine split_part
 
 end module m_particle
