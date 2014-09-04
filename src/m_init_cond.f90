@@ -60,7 +60,7 @@ contains
     call E_set_vars((/E_i_O2m, E_i_pion/), (/bgO2MinDensity, bgO2MinDensity/))
 
     ! Set the background ionization level
-    nBackgroundPairs = int(backgroundDensity * product(PD_r_max))
+    nBackgroundPairs = nint(backgroundDensity * product(PD_r_max))
     print *, "Background density creates:", nBackgroundPairs
     do ll = 1, nBackgroundPairs
        pos = (/rng%uni_01(), rng%uni_01(), rng%uni_01()/)
@@ -87,13 +87,13 @@ contains
        call CFG_get(cfg, "init_rel_pos", initSeedPos)
        call CFG_get(cfg, "init_seed_pos_radius", radius)
 
-       do ll = 1, int(nIonPairs / (2 * init_weight))
+       do ll = 1, nint(nIonPairs / (2 * init_weight))
           pos = initSeedPos * PD_r_max
           pos(1) = pos(1) - radius
           call PM_create_ei_pair(pc, pos, w=init_weight)
        end do
 
-       do ll = 1, int(nIonPairs / (2 * init_weight))
+       do ll = 1, nint(nIonPairs / (2 * init_weight))
           pos = initSeedPos * PD_r_max
           pos(1) = pos(1) + radius
           call PM_create_ei_pair(pc, pos, w=init_weight)
@@ -106,7 +106,7 @@ contains
        call CFG_get(cfg, "init_rel_pos", initSeedPos)
        initSeedPos = initSeedPos * PD_r_max
 
-       do ll = 1, int (nIonPairs / init_weight)
+       do ll = 1, nint(nIonPairs / init_weight)
           pos(1:2) = rng%two_normals()
           pos(2:3) = rng%two_normals()
           pos = initSeedPos + pos * radius
@@ -160,7 +160,7 @@ contains
        print *, "Laser nIonPairs", nIonPairs/init_weight, lineLen, minFac, maxFac
        print *, orthVec1, orthVec2
 
-       do ll = 1, int(nIonPairs/init_weight)
+       do ll = 1, nint(nIonPairs/init_weight)
           pos = (rng%uni_01() * (maxFac-minFac) + minFac) * lineDirection + lineBase
           pos = pos * PD_r_max
           pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec1
