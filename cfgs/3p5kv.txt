@@ -1,0 +1,3 @@
+elec_times      = 0.0d-9 1.0d-9
+elec_voltages   = 3.5d3 3.5d3
+sim_name        = 3p5kv
