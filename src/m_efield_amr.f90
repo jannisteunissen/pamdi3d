@@ -863,7 +863,7 @@ contains
 
        call EL_getBottomPos(elec_pos)
        elec_radius = EL_getRadius(amr_grid%r_min(3))
-       decay_range = 2 * elec_radius
+       decay_range = 3 * elec_radius
 
        amr_grid%vars(1,:,:, E_i_pot)  = 0.0d0
        amr_grid%vars(Nx,:,:, E_i_pot) = 0.0d0
@@ -1063,7 +1063,7 @@ contains
   function E_get_dr(xyz) result(dr)
     real(dp), intent(in) :: xyz(3)
     real(dp)             :: dr(3)
-    dr = get_dr_recursive(root_grid, xyz)
+    dr = get_dr(root_grid, xyz)
   end function E_get_dr
 
   function E_get_smallest_dr() result(dr)
@@ -1079,7 +1079,7 @@ contains
     end do
   end function E_get_smallest_dr
 
-  recursive function get_dr_recursive(amr_grid, xyz) result(dr)
+  function get_dr(amr_grid, xyz) result(dr)
     type(amr_grid_t), intent(in), target :: amr_grid
     real(dp), intent(in)                 :: xyz(3)
     real(dp)                             :: dr(3)
@@ -1087,7 +1087,7 @@ contains
     grid_ptr => amr_grid
     call get_grid_at(grid_ptr, xyz)
     dr       = grid_ptr%dr
-  end function get_dr_recursive
+  end function get_dr
 
   function get_vars_at_grid(amr_grid, v_ixs, xyz) result(vars)
     type(amr_grid_t), intent(in)     :: amr_grid
