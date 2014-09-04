@@ -1,3 +1,0 @@
-gas_fractions           = 0.998d0 0.002d0
-gas_names               = "N2" "O2"
-sim_name                = pi2_5kv_02pct

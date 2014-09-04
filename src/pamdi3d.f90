@@ -34,7 +34,7 @@ program pamdi3d
 
   implicit none
   integer, parameter             :: dp = kind(0.0d0)
-  character(LEN=80)              :: sim_name, cfg_name, filename
+  character(LEN=80)              :: tmp_name, sim_name, cfg_name, filename
 
   integer                        :: n
   integer                        :: n_samples
@@ -80,14 +80,18 @@ program pamdi3d
   call MPI_comm_rank(MPI_COMM_WORLD, myrank, ierr)
   call MPI_comm_size(MPI_COMM_WORLD, ntasks, ierr)
   call create_config(cfg)
+  sim_name = "sim"
 
   do ix = 1, command_argument_count()
      call get_command_argument(ix, cfg_name)
      call CFG_read_file(cfg, trim(cfg_name))
+
+     call CFG_get(cfg, "sim_name", tmp_name)
+     if (tmp_name /= "") sim_name = trim(sim_name) // "_" // trim(tmp_name)
   end do
 
-  call CFG_get(cfg, "sim_name", sim_name)
   if (myrank == root) then
+     print *, "Starting simulation ** " // trim(sim_name) // " **"
      call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
   end if
 
@@ -142,7 +146,7 @@ program pamdi3d
      if (myrank == root) print *, " ~~~ initializing photoi module"
      call pi_initialize(cfg)
   end if
-  
+
   if (myrank == root) then
      call system_clock(COUNT=WCTime_start)
      print *, 'Setting up initial electron/ion positions and fld'
