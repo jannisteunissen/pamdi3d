@@ -29,7 +29,7 @@ ref_min_lvl_electrode   = 4
 sim_max_fld_err         = 7.5D-2
 sim_min_incr_rescale    = 1.2D0
 sim_name                = "pi4"
-t_end                   = 100.0D-9
+t_end                   = 30.0D-9
 rng_seed = 12389 8934 3489 93458
 
 elec_enabled    = t
