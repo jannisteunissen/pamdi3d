@@ -4,7 +4,7 @@ CREATE_DIRS	:= output
 # Directories with altered names (useful for cleaning)
 CLEANSRC	:= $(SRC_DIRS:%=clean-%)
 
-.PHONY:	all clean $(SRC_DIRS) $(CLEANSRC) $(SUBMODULES)
+.PHONY:	all clean $(SRC_DIRS) $(CLEANSRC)
 
 all: 		$(SRC_DIRS) | $(CREATE_DIRS)
 

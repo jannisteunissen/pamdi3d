@@ -29,4 +29,3 @@ m_efield_amr.o:		m_electrode.o m_write_silo.o m_phys_domain.o
 m_init_cond.o:		m_efield_amr.o
 m_misc_process.o:	m_particle.o
 m_phys_domain.o:	m_electrode.o
-
