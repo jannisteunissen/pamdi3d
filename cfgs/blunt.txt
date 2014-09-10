@@ -1,1 +1,2 @@
 elec_rc_tip     = 0.1875d-3
+sim_name = "blunt"
