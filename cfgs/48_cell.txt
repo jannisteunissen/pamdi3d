@@ -1,0 +1,2 @@
+part_per_cell = 48
+sim_name = 48ppc
