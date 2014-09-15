@@ -75,6 +75,7 @@ module m_particle_core
      procedure, non_overridable :: correct_new_accel
      procedure, non_overridable :: get_max_coll_rate
      procedure, non_overridable :: loop_iopart
+     procedure, non_overridable :: loop_ipart
      procedure, non_overridable :: compute_scalar_sum
      procedure, non_overridable :: compute_vector_sum
      procedure, non_overridable :: move_and_collide
@@ -453,7 +454,7 @@ contains
 
   subroutine set_accel(self, accel_func)
     class(PC_t), intent(inout) :: self
-    procedure(p_to_r3_f)    :: accel_func
+    procedure(p_to_r3_f)       :: accel_func
     integer                    :: ll
 
     do ll = 1, self%n_part
@@ -471,13 +472,13 @@ contains
   subroutine correct_new_accel(self, dt, accel_func)
     use m_units_constants
     class(PC_t), intent(inout) :: self
-    real(dp), intent(IN)      :: dt
-    procedure(p_to_r3_p) :: accel_func
-    integer                   :: ll
-    real(dp)                  :: new_accel(3)
+    real(dp), intent(IN)       :: dt
+    procedure(p_to_r3_f)       :: accel_func
+    integer                    :: ll
+    real(dp)                   :: new_accel(3)
 
     do ll = 1, self%n_part
-       call accel_func(self%particles(ll), new_accel)
+       new_accel = accel_func(self%particles(ll))
        self%particles(ll)%v = self%particles(ll)%v + &
             0.5_dp * (new_accel - self%particles(ll)%a) * dt
        self%particles(ll)%a = new_accel
@@ -601,6 +602,23 @@ contains
        call pptr(self%particles(ll))
     end do
   end subroutine loop_iopart
+
+  !> Loop over all the particles and call pptr for each of them
+  subroutine loop_ipart(self, pptr)
+    class(PC_t), intent(in) :: self
+    interface
+       subroutine pptr(my_part)
+         import
+         type(PC_part_t), intent(in) :: my_part
+       end subroutine pptr
+    end interface
+
+    integer :: ll
+
+    do ll = 1, self%n_part
+       call pptr(self%particles(ll))
+    end do
+  end subroutine loop_ipart
 
   subroutine compute_vector_sum(self, pptr, my_sum)
     class(PC_t), intent(inout) :: self
