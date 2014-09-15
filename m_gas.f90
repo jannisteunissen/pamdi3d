@@ -17,21 +17,18 @@
 module m_gas
 
   implicit none
-  private
+  public
 
-  integer, parameter             :: dp            = kind(0.0d0)
-  integer                        :: GAS_num_gases = 0
-  real(dp), allocatable          :: GAS_comp_fracs(:)
-  character(len=20), allocatable :: GAS_comp_names(:)
-
-  real(dp) :: GAS_pressure, GAS_temperature, GAS_number_dens
+  integer, parameter, private               :: dp            = kind(0.0d0)
+  integer, protected                        :: GAS_num_gases = 0
+  real(dp), allocatable, protected          :: GAS_comp_fracs(:)
+  character(len=20), allocatable, protected :: GAS_comp_names(:)
+  real(dp), protected                       :: GAS_pressure
+  real(dp), protected                       :: GAS_temperature
+  real(dp), protected                       :: GAS_number_dens
 
   public :: GAS_initialize
   public :: GAS_get_fraction
-  public :: GAS_get_num_gases
-  public :: GAS_get_pressure
-  public :: GAS_get_temperature
-  public :: GAS_get_number_dens
 
 contains
 
@@ -74,21 +71,5 @@ contains
     GAS_get_fraction = 0.0_dp
     stop
   end function GAS_get_fraction
-
-  integer function GAS_get_num_gases()
-    GAS_get_num_gases = GAS_num_gases
-  end function GAS_get_num_gases
-
-  real(dp) function GAS_get_pressure()
-    GAS_get_pressure = GAS_pressure
-  end function GAS_get_pressure
-
-  real(dp) function GAS_get_temperature()
-    GAS_get_temperature = GAS_temperature
-  end function GAS_get_temperature
-
-  real(dp) function GAS_get_number_dens()
-    GAS_get_number_dens = GAS_number_dens
-  end function GAS_get_number_dens
 
 end module m_gas
