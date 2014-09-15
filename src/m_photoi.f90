@@ -32,14 +32,14 @@ contains
     end if
 
     call CFG_get(cfg, "photoi_absorp_inv_lengths", temp_vec)
-    pi_min_inv_abs_len = temp_vec(1) * frac_O2 * GAS_get_pressure()
-    pi_max_inv_abs_len = temp_vec(2) * frac_O2 * GAS_get_pressure()
+    pi_min_inv_abs_len = temp_vec(1) * frac_O2 * GAS_pressure
+    pi_max_inv_abs_len = temp_vec(2) * frac_O2 * GAS_pressure
 
     ! print *, "Max abs. length photoi.", 1.0d3 / pi_min_inv_abs_len, "mm"
     ! print *, "Min abs. length photoi.", 1.0d3 / pi_max_inv_abs_len, "mm"
 
     pi_quench_fac = (30.0D0 * UC_torr_to_bar) / &
-         (GAS_get_pressure() + (30.0D0 * UC_torr_to_bar))
+         (GAS_pressure + (30.0D0 * UC_torr_to_bar))
 
     call CFG_get_size(cfg, "photoi_efficiency_table", t_size)
     call CFG_get_size(cfg, "photoi_efield_table", t_size_2)

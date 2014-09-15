@@ -80,8 +80,8 @@ program pamdi3d
   call MPI_comm_rank(MPI_COMM_WORLD, myrank, ierr)
   call MPI_comm_size(MPI_COMM_WORLD, ntasks, ierr)
   call create_config(cfg)
-  sim_name = "sim"
 
+  sim_name = "sim"
   do ix = 1, command_argument_count()
      call get_command_argument(ix, cfg_name)
      call CFG_read_file(cfg, trim(cfg_name))
@@ -121,7 +121,7 @@ program pamdi3d
   if (myrank == root) print *, "Reading crossection data"
   do n = 1, n_gas_comp
      call CS_add_from_file("input/" // gas_files(n), gas_names(n), &
-          gas_fracs(n) * GAS_get_number_dens(), max_ev, cross_secs)
+          gas_fracs(n) * GAS_number_dens, max_ev, cross_secs)
   end do
 
   ! Initialize all modules that need initialization

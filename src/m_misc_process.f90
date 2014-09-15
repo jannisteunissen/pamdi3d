@@ -32,8 +32,8 @@ contains
 
   subroutine MISC_initialize()
     use m_gas
-    MISC_O2_bgdens = GAS_get_number_dens() * GAS_get_fraction("O2")
-    MISC_N2_bgdens = GAS_get_number_dens() * GAS_get_fraction("N2")
+    MISC_O2_bgdens = GAS_number_dens * GAS_get_fraction("O2")
+    MISC_N2_bgdens = GAS_number_dens * GAS_get_fraction("N2")
   end subroutine MISC_initialize
 
   subroutine MISC_detachment(pc, rng, dt, myrank, root)
@@ -130,7 +130,7 @@ contains
     real(dp), intent(in) :: O2min_dens, e_str
     real(dp) :: T_eff
 
-    T_eff = GAS_get_temperature() + UC_N2_mass / (3.0d0 * UC_boltzmann_const) * (e_str * 2.0d-4)**2
+    T_eff = GAS_temperature + UC_N2_mass / (3.0d0 * UC_boltzmann_const) * (e_str * 2.0d-4)**2
     MISC_get_O2m_loss = 1.9d-12 * sqrt(T_eff/3.0d2) * exp(-4.990e3/T_eff) * MISC_N2_bgdens * 1.0d-6 + &
          2.7d-10 * sqrt(T_eff/3.0d2) * exp(-5.590e3/T_eff) * MISC_O2_bgdens * 1.0d-6
     MISC_get_O2m_loss = MISC_get_O2m_loss * O2min_dens * MISC_dt
