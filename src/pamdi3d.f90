@@ -34,7 +34,8 @@ program pamdi3d
 
   implicit none
   integer, parameter             :: dp = kind(0.0d0)
-  character(LEN=80)              :: tmp_name, sim_name, cfg_name, filename
+  character(LEN=100)             :: tmp_name, sim_name, cfg_name
+  character(LEN=100)             :: filename, prev_name
 
   integer                        :: n
   integer                        :: n_samples
@@ -82,12 +83,15 @@ program pamdi3d
   call create_config(cfg)
 
   sim_name = "sim"
+  prev_name = ""
   do ix = 1, command_argument_count()
      call get_command_argument(ix, cfg_name)
      call CFG_read_file(cfg, trim(cfg_name))
 
      call CFG_get(cfg, "sim_name", tmp_name)
-     if (tmp_name /= "") sim_name = trim(sim_name) // "_" // trim(tmp_name)
+     if (tmp_name /= "" .and. tmp_name /= prev_name) &
+          sim_name = trim(sim_name) // "_" // trim(tmp_name)
+     prev_name = tmp_name
   end do
 
   if (myrank == root) then
