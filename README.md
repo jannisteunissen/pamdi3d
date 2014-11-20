@@ -34,10 +34,9 @@ $ git fetch
 or
 
 ```
-
 $ git pull; git merge origin/master
-
 ```
+
 The submodules might be updated, so after that, run
 
 ```
@@ -73,3 +72,10 @@ $ ./pampi3d cfg_base.txt cfg_1.txt
 
 In each configuration file, you can specify a different "sim_name" variable.
 These names will be appended to each other.
+
+## Visualizing the output
+
+I'd highly recommend
+[Visit](https://wci.llnl.gov/simulation/computer-codes/visit/downloads) to
+visualize the output. Output files have the
+[Silo](https://wci.llnl.gov/simulation/computer-codes/silo) format.
