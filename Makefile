@@ -4,7 +4,7 @@ OBJS	:= m_gas.o m_particle_core.o m_particle_par.o m_cross_sec.o kdtree2.o
 
 INCDIRS	:= ../fosito
 
-ifeq (DEBUG, 1)
+ifeq ($(DEBUG), 1)
 	FFLAGS += -fcheck=array-temps,bounds,do,mem,pointer\
 	-g -ffpe-trap=invalid,zero,overflow
 endif
