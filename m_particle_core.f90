@@ -166,7 +166,6 @@ contains
 
     call self%rng%set_seed((/1, 3, 3, 1337/))
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
-    print *, "Max coll rate", self%max_rate, self%inv_max_rate
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
