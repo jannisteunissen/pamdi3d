@@ -249,9 +249,9 @@ program pamdi3d
              sim_time - prev_fld_time, myrank, root)
 
         call PM_particles_to_density(pc)
-        call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.true.)
+        call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.true.)
         call E_compute_field(myrank, root, sim_time)
-        call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.false.)
+        call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.false.)
         if (myrank == root) print *, "Field error", fld_err
         call pc%set_accel(E_get_accel_part)
 
@@ -320,7 +320,7 @@ program pamdi3d
                    mean_weight, "nParticles", n_part_sum
            end if
 
-           call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.true.)
+           call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.true.)
            call PM_adjust_weights(pc)
 
            n_part_sum = PP_get_num_sim_part(pc)
@@ -328,7 +328,7 @@ program pamdi3d
 
            call PM_particles_to_density(pc)
            call E_compute_field(myrank, root, sim_time)
-           call PM_fld_error(pc, rng, n_samples, fld_err, only_store=.false.)
+           call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.false.)
 
            if (myrank == root) print *, "Fld error due to rescaling:", fld_err
 

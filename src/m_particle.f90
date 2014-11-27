@@ -139,7 +139,10 @@ contains
     weight = max(1.0_dp, min(PM_max_weight, weight))
   end function weight_func
 
-  subroutine PM_fld_error(pc, rng, n_samples, fld_err, only_store)
+  ! This routine can be used to estimate the error in the electric field. It
+  ! should first be called with store_samples = .true., then a later call with
+  ! store_samples = .false. sets the error in fld_err.
+  subroutine PM_fld_error(pc, rng, n_samples, fld_err, store_samples)
     use m_efield_amr
     use m_random
     use mpi
@@ -147,40 +150,49 @@ contains
     type(RNG_t), intent(inout) :: rng
     integer, intent(in) :: n_samples
     real(dp), intent(out) :: fld_err
-    logical, intent(in) :: only_store
+    logical, intent(in) :: store_samples
 
     integer :: i, n, ierr
     real(dp) :: fld(3), this_err, avg_norm
     real(dp), allocatable, save :: pos_samples(:, :)
     real(dp), allocatable, save :: fld_samples(:, :)
+    logical, save :: have_samples = .false.
 
-    if (pc%n_part < 1) then
+    if (store_samples) then
+       ! Store samples of the electric field
+
+       if (pc%n_part < 1) then
+          ! Not enough particles to store samples
+          have_samples = .false.
+       else
+          have_samples = .true.
+          if (allocated(fld_samples)) deallocate(fld_samples)
+          if (allocated(pos_samples)) deallocate(pos_samples)
+          allocate(fld_samples(3, n_samples))
+          allocate(pos_samples(3, n_samples))
+
+          do i = 1, n_samples
+             ! Randomly select a particle
+             n = rng%int_ab(1, pc%n_part)
+             pos_samples(:,i) = pc%particles(n)%x
+             fld_samples(:,i) = E_get_field(pos_samples(:,i))
+          end do
+       end if
+
+    else if (.not. store_samples) then
+       ! Compute the error
        fld_err = 0
-       return
-    end if
 
-    if (only_store) then
-       fld_err = 0
-       if (allocated(fld_samples)) deallocate(fld_samples)
-       if (allocated(pos_samples)) deallocate(pos_samples)
-       allocate(fld_samples(3, n_samples))
-       allocate(pos_samples(3, n_samples))
+       if (have_samples) then
+          avg_norm = norm2(fld_samples) / sqrt(1.0_dp * n_samples)
 
-       do i = 1, n_samples
-          ! Randomly select a particle
-          n = rng%int_ab(1, pc%n_part)
-          pos_samples(:,i) = pc%particles(n)%x
-          fld_samples(:,i) = E_get_field(pos_samples(:,i))
-       end do
-    else
-       avg_norm = norm2(fld_samples) / sqrt(1.0_dp * n_samples)
-
-       do i = 1, n_samples
-          fld      = E_get_field(pos_samples(:,i))
-          this_err = norm2(fld - fld_samples(:,i)) / &
-               max(norm2(fld), norm2(fld_samples(:,i)), avg_norm)
-          fld_err  = max(fld_err, this_err)
-       end do
+          do i = 1, n_samples
+             fld      = E_get_field(pos_samples(:,i))
+             this_err = norm2(fld - fld_samples(:,i)) / &
+                  max(norm2(fld), norm2(fld_samples(:,i)), avg_norm)
+             fld_err  = max(fld_err, this_err)
+          end do
+       end if
     end if
 
     call MPI_ALLREDUCE(MPI_IN_PLACE, fld_err, 1, MPI_DOUBLE_PRECISION, &
