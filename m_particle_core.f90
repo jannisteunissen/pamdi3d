@@ -149,14 +149,15 @@ contains
 
   !> Initialization routine for the particle module
   subroutine initialize(self, mass, cross_secs, lookup_table_size, &
-       max_en_eV, n_part_max)
+       max_en_eV, n_part_max, rng_seed)
     use m_cross_sec
     use m_units_constants
-    class(PC_t), intent(inout) :: self
-    type(CS_t), intent(in)     :: cross_secs(:)
-    integer, intent(in)        :: lookup_table_size
-    real(dp), intent(in)       :: mass, max_en_eV
-    integer, intent(in)        :: n_part_max
+    class(PC_t), intent(inout)    :: self
+    type(CS_t), intent(in)        :: cross_secs(:)
+    integer, intent(in)           :: lookup_table_size
+    real(dp), intent(in)          :: mass, max_en_eV
+    integer, intent(in)           :: n_part_max
+    integer, intent(in), optional :: rng_seed(4)
 
     if (size(cross_secs) < 1) then
        print *, "No cross sections given, will abort"
@@ -167,7 +168,12 @@ contains
     self%mass   = mass
     self%n_part = 0
 
-    call self%rng%set_seed((/1, 3, 3, 1337/))
+    if (present(rng_seed)) then
+       call self%rng%set_seed(rng_seed)
+    else
+       call self%rng%set_seed((/1, 3, 3, 1337/))
+    end if
+
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
@@ -175,10 +181,11 @@ contains
   end subroutine initialize
 
   !> Initialization routine for the particle module
-  subroutine init_from_file(self, param_file, lt_file)
+  subroutine init_from_file(self, param_file, lt_file, rng_seed)
     use m_cross_sec
-    class(PC_t), intent(inout)   :: self
-    character(len=*), intent(in) :: param_file, lt_file
+    class(PC_t), intent(inout)    :: self
+    character(len=*), intent(in)  :: param_file, lt_file
+    integer, intent(in), optional :: rng_seed(4)
 
     integer                      :: my_unit
     integer                      :: n_part_max
@@ -199,7 +206,11 @@ contains
 
     call LT_from_file(self%rate_lt, lt_file)
 
-    call self%rng%set_seed((/1, 3, 3, 1337/))
+    if (present(rng_seed)) then
+       call self%rng%set_seed(rng_seed)
+    else
+       call self%rng%set_seed((/1, 3, 3, 1337/))
+    end if
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
