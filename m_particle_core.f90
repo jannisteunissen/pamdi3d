@@ -90,6 +90,9 @@ module m_particle_core
      procedure, non_overridable :: get_num_colls
      procedure, non_overridable :: get_colls
      procedure, non_overridable :: get_coeffs
+
+     procedure, non_overridable :: init_from_file
+     procedure, non_overridable :: to_file
   end type PC_t
 
   type, abstract, public :: PC_bin_t
@@ -170,6 +173,53 @@ contains
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
   end subroutine initialize
+
+  !> Initialization routine for the particle module
+  subroutine init_from_file(self, param_file, lt_file)
+    use m_cross_sec
+    class(PC_t), intent(inout)   :: self
+    character(len=*), intent(in) :: param_file, lt_file
+
+    integer                      :: my_unit
+    integer                      :: n_part_max
+
+    open(newunit=my_unit, file=trim(param_file), form='UNFORMATTED', &
+         access='STREAM', status='OLD')
+
+    read(my_unit) n_part_max, self%n_colls
+    read(my_unit) self%mass, self%max_rate
+    allocate(self%colls(self%n_colls))
+    read(my_unit) self%colls
+
+    close(my_unit)
+
+    self%inv_max_rate = 1 / self%max_rate
+    self%n_part       = 0
+    allocate(self%particles(n_part_max))
+
+    call LT_from_file(self%rate_lt, lt_file)
+
+    call self%rng%set_seed((/1, 3, 3, 1337/))
+
+    call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
+    call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
+  end subroutine init_from_file
+
+  subroutine to_file(self, param_file, lt_file)
+    use m_cross_sec
+    class(PC_t), intent(inout)   :: self
+    character(len=*), intent(in) :: param_file, lt_file
+    integer                      :: my_unit
+
+    open(newunit=my_unit, file=trim(param_file), form='UNFORMATTED', &
+         access='STREAM', status='REPLACE')
+    write(my_unit) size(self%particles), self%n_colls
+    write(my_unit) self%mass, self%max_rate
+    write(my_unit) self%colls
+    close(my_unit)
+
+    call LT_to_file(self%rate_lt, lt_file)
+  end subroutine to_file
 
   subroutine set_coll_callback(self, pptr)
     class(PC_t), intent(inout) :: self
@@ -725,6 +775,8 @@ contains
           rate_list(i_row) = rate_list(i_row) * vel_list(i_row)
        end do
 
+       ! We store the sum of the collision rates with index up to i_c, this
+       ! makes the null-collision method straightforward.
        sum_rate_list = sum_rate_list + rate_list
        call LT_set_col(self%rate_lt, i_c, vel_list, sum_rate_list)
     end do
