@@ -20,7 +20,7 @@ module m_init_cond
    private
 
    integer, parameter :: dp = kind(0.0d0)
-   
+
    public :: IC_set_init_cond
 
 contains
@@ -33,7 +33,7 @@ contains
     use m_phys_domain
     use m_particle_core
     use m_particle
-    type(PC_t), intent(inout) :: pc
+    class(PC_t), intent(inout) :: pc
     type(CFG_t), intent(in) :: cfg
     type(RNG_t), intent(inout) :: rng
     character(LEN=40)      :: initCond

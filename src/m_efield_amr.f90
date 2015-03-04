@@ -510,13 +510,13 @@ contains
   subroutine E_loop_over_grids(pc, rng, func_p)
     use m_particle_core
     use m_random
-    type(PC_t), intent(inout) :: pc
+    class(PC_t), intent(inout) :: pc
     type(RNG_t), intent(inout) :: rng
 
     interface
        subroutine func_p(pc, rng, ag)
          import
-         type(PC_t), intent(inout) :: pc
+         class(PC_t), intent(inout) :: pc
          type(RNG_t), intent(inout) :: rng
          type(amr_grid_t), intent(inout) :: ag
        end subroutine func_p

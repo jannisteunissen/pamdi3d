@@ -42,7 +42,7 @@ contains
     use m_random
     real(dp), intent(in) :: dt
     integer, intent(in)  :: myrank, root
-    type(PC_t), intent(inout) :: pc
+    class(PC_t), intent(inout) :: pc
     type(RNG_t), intent(inout) :: rng
 
     ! Set global vars
@@ -63,7 +63,7 @@ contains
     use m_particle
     use m_random
     use m_phys_domain
-    type(PC_t), intent(inout)       :: pc
+    class(PC_t), intent(inout)       :: pc
     type(RNG_t), intent(inout)      :: rng
     type(amr_grid_t), intent(inout) :: amr_grid
     real(dp), allocatable           :: loss(:,:,:)
