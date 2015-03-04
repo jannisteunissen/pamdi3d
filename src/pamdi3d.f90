@@ -241,6 +241,7 @@ program pamdi3d
      sim_time       = sim_time + dt
 
      call pc%advance(dt)
+     call pc%correct_new_accel(dt, E_get_accel_part)
 
      if (steps_left_fld <= 0) then
         n_part_sum = PP_get_num_sim_part(pc)
