@@ -43,7 +43,7 @@ contains
     use m_cross_sec
     use m_config
     use m_phys_domain
-    type(PC_t), intent(inout) :: pc
+    class(PC_t), intent(inout) :: pc
     type(CS_t), intent(in)    :: cross_secs(:)
     type(CFG_t), intent(in)   :: cfg
     integer, intent(in)       :: myrank, ntasks
@@ -110,7 +110,7 @@ contains
 
   subroutine PM_create_ei_pair(pc, lx, v, a, w, t_left)
     use m_efield_amr
-    type(PC_t), intent(inout)      :: pc
+    class(PC_t), intent(inout)      :: pc
     real(dp), intent(in)           :: lx(3)
     real(dp), intent(in), optional :: v(3), a(3), w, t_left
     real(dp)                       :: lv(3), la(3), lw, lt_left
@@ -125,7 +125,7 @@ contains
   end subroutine PM_create_ei_pair
 
   subroutine PM_adjust_weights(pc)
-    type(PC_t), intent(inout) :: pc
+    class(PC_t), intent(inout) :: pc
     call pc%merge_and_split((/.true., .true., .true./), PM_v_rel_weight, &
          .true., weight_func, PC_merge_part_rxv, split_part)
   end subroutine PM_adjust_weights
@@ -146,7 +146,7 @@ contains
     use m_efield_amr
     use m_random
     use mpi
-    type(PC_t), intent(in) :: pc
+    class(PC_t), intent(in) :: pc
     type(RNG_t), intent(inout) :: rng
     integer, intent(in) :: n_samples
     real(dp), intent(out) :: fld_err
@@ -201,7 +201,7 @@ contains
 
   subroutine PM_particles_to_density(pc)
     use m_efield_amr
-    type(PC_t), intent(in) :: pc
+    class(PC_t), intent(in) :: pc
     integer                :: ll
 
     call E_set_vars((/E_i_elec/), (/0.0_dp/))
@@ -216,7 +216,7 @@ contains
     use m_efield_amr
     use mpi
     use m_mrgrnk
-    type(PC_t), intent(in) :: pc
+    class(PC_t), intent(in) :: pc
     type(RNG_t), intent(inout) :: rng
     integer, intent(in) :: n_samples
     real(dp), intent(in) :: cfl_num
@@ -271,7 +271,7 @@ contains
     use m_units_constants
     use m_random
     use m_efield_amr
-    type(PC_t), intent(inout)  :: pc
+    class(PC_t), intent(inout)  :: pc
     type(RNG_t), intent(inout) :: rng
     real(dp), intent(in)       :: max_dens
     integer                    :: ll
