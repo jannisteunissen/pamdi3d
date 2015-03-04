@@ -8,18 +8,9 @@ First, clone the repository (in this case into a folder pamdi3d)
 $ git clone https://github.com/jannisteunissen/pamdi3d pamdi3d
 ```
 
-The code uses git submodules, so for the first compilation you should initialize
-and update the submodules.
-
+After that, you can compile with just
 ```
 $ cd pamdi3d
-$ git submodule init
-$ git submodule update
-```
-
-After that, you can compile with just
-
-```
 $ make
 ```
 
@@ -35,12 +26,6 @@ or
 
 ```
 $ git pull; git merge origin/master
-```
-
-The submodules might be updated, so after that, run
-
-```
-$ git submodule update
 ```
 
 To do a fresh compilation:
