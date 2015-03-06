@@ -340,7 +340,6 @@ contains
           case (CS_attach_t)
              call attach_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
-             go to 100 ! Particle is removed, so exit
           case (CS_elastic_t)
              call elastic_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
@@ -358,6 +357,7 @@ contains
           ! rest at the end of the list.
           if (n_part_out == 0) then
              call self%remove_part(ll)
+             go to 100          ! Particle no longer exists
           else if (n_part_out == 1) then
              self%particles(ll) = part_out(1)
           else
