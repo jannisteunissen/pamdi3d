@@ -6,7 +6,7 @@ dt_grid_adapt           = 1.0d-11
 dt_max                  = 10.0D-12
 dt_min                  = 1.0D-13
 dt_output               = 1.0D-10
-t_end                   = 10.0D-9
+t_end                   = 3.0D-9
 
 # Electric field values vs time
 sim_efield_times        = 0.0
@@ -41,7 +41,7 @@ init_rel_pos            = 0.5d0 0.5d0 0.5d0
 init_seed_pos_radius    = 10.0D-6
 
 # Settings for the particle model
-part_max_num            = 75000000
+part_max_num            = 5000000
 part_max_weight         = 1000
 part_n_rescale          = 100000
 part_per_cell           = 64
