@@ -260,6 +260,7 @@ program pamdi3d
         call PP_share_mpi(pc, myrank, ntasks)
 
         dt_next = PM_get_max_dt(pc, rng, n_samples, cfl_num)
+        dt_next = min(dt_max, dt_next)
 
         if (myrank == root) then
            dt_fld         = get_new_dt(dt_fld, fld_err, max_fld_err)

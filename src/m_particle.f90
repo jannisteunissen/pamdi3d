@@ -216,41 +216,40 @@ contains
     use m_efield_amr
     use mpi
     use m_mrgrnk
-    class(PC_t), intent(in) :: pc
+    class(PC_t), intent(in)    :: pc
     type(RNG_t), intent(inout) :: rng
-    integer, intent(in) :: n_samples
-    real(dp), intent(in) :: cfl_num
-    real(dp) :: dt_max
+    integer, intent(in)        :: n_samples
+    real(dp), intent(in)       :: cfl_num
+    real(dp)                   :: dt_max
 
-    real(dp) :: vel_est, min_dr
-    real(dp), allocatable :: velocities(:)
-    integer, allocatable :: ix_list(:)
-    integer :: n, ix, ierr
+    real(dp)                   :: vel_est, min_dr
+    real(dp), allocatable      :: velocities(:)
+    integer, allocatable       :: ix_list(:)
+    integer                    :: n, ix, ierr
 
     allocate(velocities(n_samples))
     allocate(ix_list(n_samples))
 
-    if (pc%n_part == 0) then
-       print *, "No particles, dt_max = 1.0e-12"
-       dt_max = 1.0e-12_dp
-       return
+    if (pc%n_part > 0) then
+       ! Estimate maximum velocity of particles
+       do n = 1, n_samples
+          ix = rng%int_ab(1, pc%n_part)
+          velocities(n) = norm2(pc%particles(ix)%v)
+       end do
+
+       call mrgrnk(velocities, ix_list)
+       velocities = velocities(ix_list)
+
+       vel_est = velocities(nint(n_samples * 0.9_dp))
+
+       ! Get smallest grid delta
+       min_dr = minval(E_get_smallest_dr())
+
+       dt_max = cfl_num * min_dr / vel_est
+    else
+       dt_max = huge(1.0_dp)
     end if
 
-    ! Estimate maximum velocity of particles
-    do n = 1, n_samples
-       ix = rng%int_ab(1, pc%n_part)
-       velocities(n) = norm2(pc%particles(ix)%v)
-    end do
-
-    call mrgrnk(velocities, ix_list)
-    velocities = velocities(ix_list)
-
-    vel_est = velocities(nint(n_samples * 0.9_dp))
-
-    ! Get smallest grid delta
-    min_dr = minval(E_get_smallest_dr())
-
-    dt_max = cfl_num * min_dr / vel_est
     call MPI_ALLREDUCE(MPI_IN_PLACE, dt_max, 1, MPI_DOUBLE_PRECISION, &
          MPI_MIN, MPI_COMM_WORLD, ierr)
   end function PM_get_max_dt
