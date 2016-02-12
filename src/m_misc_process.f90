@@ -24,16 +24,27 @@ module m_misc_process
   real(dp) :: MISC_N2_bgdens
   real(dp) :: MISC_O2_bgdens
   real(dp) :: MISC_dt
+  real(dp) :: MISC_gamma_decay_time
 
   public :: MISC_initialize
   public :: MISC_detachment
+  public :: MISC_gamma
 
 contains
 
-  subroutine MISC_initialize()
+  subroutine MISC_initialize(cfg)
+    use m_config
     use m_gas
-    MISC_O2_bgdens = GAS_number_dens * GAS_get_fraction("O2")
-    MISC_N2_bgdens = GAS_number_dens * GAS_get_fraction("N2")
+    type(CFG_t), intent(in) :: cfg
+    logical :: use_detach
+
+    call CFG_get(cfg, "sim_use_o2m_detach", use_detach)
+    call CFG_get(cfg, "gamma_decay_time", MISC_gamma_decay_time)
+
+    if (use_detach) then
+       MISC_O2_bgdens = GAS_number_dens * GAS_get_fraction("O2")
+       MISC_N2_bgdens = GAS_number_dens * GAS_get_fraction("N2")
+    end if
   end subroutine MISC_initialize
 
   subroutine MISC_detachment(pc, rng, dt, myrank, root)
@@ -135,5 +146,16 @@ contains
          2.7d-10 * sqrt(T_eff/3.0d2) * exp(-5.590e3/T_eff) * MISC_O2_bgdens * 1.0d-6
     MISC_get_O2m_loss = MISC_get_O2m_loss * O2min_dens * MISC_dt
   end function MISC_get_O2m_loss
+
+  subroutine MISC_gamma(dt)
+    use m_efield_amr
+    real(dp), intent(in) :: dt
+    real(dp)             :: factor
+
+    factor = exp(-dt / MISC_gamma_decay_time)
+
+    call E_multiply_grids(E_i_gamma, factor)
+
+  end subroutine MISC_gamma
 
 end module m_misc_process

@@ -27,12 +27,12 @@ module m_efield_amr
   end type box_t
 
   integer, parameter :: E_i_pot  = 1, E_i_pion = 2, E_i_elec = 3, &
-       E_i_nion = 4, E_i_O2m  = 5, E_i_src  = 6, &
-       E_i_Ex   = 7, E_i_Ey   = 8, E_i_Ez   = 9, E_i_tmp = 10, E_n_vars = 10
-  character(len=*), parameter :: E_var_names(*) = (/"pot ", "pion", "elec", &
-       "nion", "O2m ", "src ", "Ex  ", "Ey  ", "Ez  ", "E   "/)
-  character(len=*), parameter :: E_var_units(*) = (/"V   ", "1_m3", "1_m3", &
-       "1_m3", "1_m3", "1_m3", "V_m ", "V_m ", "V_m ", "V_m "/)
+       E_i_nion = 4, E_i_O2m  = 5, E_i_src  = 6, E_i_Ex   = 7, &
+       E_i_Ey   = 8, E_i_Ez   = 9, E_i_tmp = 10, E_i_gamma = 11, E_n_vars = 11
+  character(len=*), parameter :: E_var_names(E_n_vars) = (/character(len=10) :: &
+       "pot", "pion", "elec", "nion", "O2m", "src", "Ex", "Ey", "Ez", "E", "gamma"/)
+  character(len=*), parameter :: E_var_units(E_n_vars) = (/"V   ", "1_m3", "1_m3", &
+       "1_m3", "1_m3", "1_m3", "V_m ", "V_m ", "V_m ", "V_m ", "arb."/)
 
   integer  :: E_min_grid_size
   integer  :: E_bc_type
@@ -59,7 +59,7 @@ module m_efield_amr
   type(amr_grid_t), pointer :: root_grid
 
   public :: amr_grid_t
-  public :: E_i_elec, E_i_pion, E_i_nion, E_i_O2m
+  public :: E_i_elec, E_i_pion, E_i_nion, E_i_O2m, E_i_gamma
 
   public :: E_initialize
   public :: E_benchmark
@@ -76,6 +76,7 @@ module m_efield_amr
   public :: E_get_max_of_vars
   public :: E_collect_mpi
   public :: E_loop_over_grids
+  public :: E_multiply_grids
   public :: E_add_to_var
   public :: E_xyz_to_ix
   public :: E_ix_to_xyz
@@ -531,6 +532,21 @@ contains
     end do
   end subroutine E_loop_over_grids
 
+  subroutine E_multiply_grids(iv, factor)
+    integer, intent(in)  :: iv
+    real(dp), intent(in) :: factor
+
+    integer                       :: ix
+    type(amr_grid_p), allocatable :: grid_list(:)
+
+    call create_grid_list(root_grid, grid_list)
+
+    do ix = 1, size(grid_list)
+       grid_list(ix)%ptr%vars(:,:,:, iv) = factor * &
+            grid_list(ix)%ptr%vars(:,:,:, iv)
+    end do
+  end subroutine E_multiply_grids
+
   ! After this routine the electric field has to be recomputed!
   subroutine E_update_grids(myrank, root, time)
     integer, intent(in)       :: myrank, root
@@ -539,7 +555,7 @@ contains
 
     ! print *, myrank, "updating grids"
     call mpi_collect_recursive(root_grid, &
-         (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/), myrank, root)
+         (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_gamma/), myrank, root)
 
     if (myrank == root) then
        allocate(new_grid)
@@ -549,7 +565,7 @@ contains
 
        ! Boundary values are not correctly set in a PIC simulation, so get from parent
        call set_bc_from_parent_recursive(root_grid, &
-            (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/))
+            (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_gamma/))
        call set_new_grids_recursive(new_grid)
        call recursive_remove_amr_grid(root_grid)
        deallocate(root_grid)
@@ -605,7 +621,7 @@ contains
     integer, allocatable                    :: ref_ixs(:, :)
     type(box_t), allocatable                :: box_list(:)
     integer, parameter                      :: v_ixs(*) = &
-         (/E_i_pion, E_i_nion, E_i_O2m, E_i_elec/)
+         (/E_i_pion, E_i_nion, E_i_O2m, E_i_elec, E_i_gamma/)
 
     if (associated(amr_grid%children) .or. amr_grid%n_child > 0) then
        print *, "set_new_grids_recursive error: children already present!"
@@ -1357,11 +1373,11 @@ contains
     real(dp), allocatable           :: tmp_grid(:, :, :)
 
     call mpi_collect_recursive(root_grid, &
-         (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/), myrank, root)
+         (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_gamma/), myrank, root)
 
     if (myrank == root) then
        call set_bc_from_parent_recursive(root_grid, &
-            (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/))
+            (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m, E_i_gamma/))
        call create_grid_list(root_grid, grid_list)
        call SILO_create_file(filename)
 

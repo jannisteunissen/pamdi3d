@@ -86,6 +86,7 @@ contains
     select case (c_type)
     case (CS_ionize_t)
        call E_add_to_var(E_i_pion, my_part%x, my_part%w)
+       call E_add_to_var(E_i_gamma, my_part%x, my_part%w)
 
        if (PM_use_photoi) then
           call pi_from_ionization(my_part, photons)

@@ -141,10 +141,8 @@ program pamdi3d
   call CFG_get(cfg, "photoi_enabled", use_photoi)
   call CFG_get(cfg, "sim_use_o2m_detach", use_detach)
 
-  if (use_detach) then
-     if (myrank == root) print *, " ~~~ initializing misc module"
-     call MISC_initialize()
-  end if
+  if (myrank == root) print *, " ~~~ initializing misc module"
+  call MISC_initialize(cfg)
 
   if (use_photoi) then
      if (myrank == root) print *, " ~~~ initializing photoi module"
@@ -246,6 +244,9 @@ program pamdi3d
      if (steps_left_fld <= 0) then
         n_part_sum = PP_get_num_sim_part(pc)
         n_elec_sum = PP_get_num_real_part(pc)
+
+        call MISC_gamma(sim_time - prev_fld_time)
+
         if (use_detach) call MISC_detachment(pc, rng, &
              sim_time - prev_fld_time, myrank, root)
 
@@ -495,6 +496,10 @@ contains
          & "Only particles with a weight < maxWeight will be rescaled")
     call CFG_add(cfg, "part_v_rel_weight", 1.0e-12_dp, &
          & "Scale factor for v coords compared to x coords when merging")
+
+    ! Parameters for the output of the time-integrated ionization
+    call CFG_add(cfg, "gamma_decay_time", 1.0e-9_dp, &
+         "Decay time for time-integrated ionization density")
 
     ! Photoionization parameters
     call CFG_add(cfg, "photoi_enabled", .false., &
