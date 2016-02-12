@@ -272,7 +272,7 @@ program pamdi3d
            flag_output = n_output <= sim_time / time_per_output .or. finished
            rescale     = n_part_sum > n_part_rescale .and. &
                 n_part_sum > int(n_part_sum_prev * min_incr_rescale)
-           rescale     = rescale .or. step_cntr == 1
+           rescale     = rescale
            adapt_grid  = n_grid_adapt <= sim_time / time_per_grid_adapt
         end if
 
