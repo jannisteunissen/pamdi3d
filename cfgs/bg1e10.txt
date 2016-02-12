@@ -1,0 +1,3 @@
+init_n_ion_pairs = 0
+init_bg_dens = 1e10
+sim_name = bg10
