@@ -280,8 +280,7 @@ contains
     call E_get_max_of_vars((/E_i_elec/), cur_max_dens)
     if (cur_max_dens(1) < max_dens) return
 
-    print *, "Artificially attaching electrons for stability"
-    print *, "Max elec dens", cur_max_dens, max_dens
+    ! print *, "Max elec dens", cur_max_dens, max_dens
     do ll = 1, pc%n_part
        local_dens = E_get_var(E_i_elec, pc%particles(ll)%x)
 
