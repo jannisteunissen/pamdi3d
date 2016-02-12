@@ -1349,10 +1349,12 @@ contains
     real(dp), intent(in)            :: time
 
     integer                         :: ix, v_ix, n_grids
+    integer                         :: nc, i_min(3), i_max(3)
     type(amr_grid_p), allocatable   :: grid_list(:)
     type(amr_grid_t), pointer       :: grid
     character(len=100), allocatable :: mesh_name_list(:), var_name_list(:, :)
     character(len=*), parameter     :: grid_name = "grid_", amr_name = "amr_grid"
+    real(dp), allocatable           :: tmp_grid(:, :, :)
 
     call mpi_collect_recursive(root_grid, &
          (/E_i_pion, E_i_elec, E_i_nion, E_i_O2m/), myrank, root)
@@ -1372,14 +1374,31 @@ contains
           write(mesh_name_list(ix), "(A,I0)") grid_name, ix
           call SILO_add_grid(filename, mesh_name_list(ix), 3, grid%Nr, grid%r_min, grid%dr)
 
+          allocate(tmp_grid(grid%Nr(1), grid%Nr(2), grid%Nr(3)))
+
           grid%vars(:,:,:, E_i_tmp) = sqrt(grid%vars(:,:,:, E_i_Ex)**2 + grid%vars(:,:,:, E_i_Ey)**2 &
                + grid%vars(:,:,:, E_i_Ez)**2)
 
           do v_ix = 1, E_n_vars
              write(var_name_list(v_ix, ix), "(A,I0)") trim(E_var_names(v_ix)) // "_", ix
+
+             ! Store a copy of the data in tmp_grid, and set all values covered
+             ! by finer grids (children) to zero
+             tmp_grid = grid%vars(:,:,:, v_ix)
+
+             do nc = 1, grid%n_child
+                i_min = E_xyz_to_ix(grid, grid%children(nc)%r_min)
+                i_max = E_xyz_to_ix(grid, grid%children(nc)%r_max)
+
+                ! Erase *interior* child region
+                tmp_grid(i_min(1)+1:i_max(1)-1, i_min(2)+1:i_max(2)-1, &
+                     i_min(3)+1:i_max(3)-1) = 0
+             end do
+
              call SILO_add_var(filename, var_name_list(v_ix, ix), mesh_name_list(ix), &
-                  pack(grid%vars(:,:,:, v_ix), .true.), grid%Nr, E_var_units(v_ix))
+                  pack(tmp_grid, .true.), grid%Nr, E_var_units(v_ix))
           end do
+          deallocate(tmp_grid)
        end do
 
        call SILO_set_multimesh_grid(filename, amr_name, mesh_name_list, n_cycle, time)
