@@ -506,7 +506,7 @@ contains
          "Whether photoionization is used")
     CALL CFG_add(cfg, "photoi_efield_table", (/ 0.0D0, 0.25D7, 0.4D7, 0.75D7, 1.5D7, 3.75D7/), &
          & "The tabulated values of the electric field (for the photo-efficiency)")
-    CALL CFG_add(cfg, "photoi_efficiency_table", (/0.05D0, 0.05D0, 0.12D0, 0.08D0, 0.06D0, 0.4D0/), &
+    CALL CFG_add(cfg, "photoi_efficiency_table", (/0.05D0, 0.05D0, 0.12D0, 0.08D0, 0.06D0, 0.04D0/), &
          & "The tabulated values of the the photo-efficiency")
     CALL CFG_add(cfg, "photoi_frequencies", (/2.925D12, 3.059D12/), &
          & "The lower/upper bound for the frequency of the photons, not currently used")
