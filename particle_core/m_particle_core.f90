@@ -361,6 +361,7 @@ contains
           else if (n_part_out == 1) then
              self%particles(ll) = part_out(1)
           else
+             call self%check_space(self%n_part + n_part_out - 1)
              self%particles(ll) = part_out(1)
              self%particles(self%n_part+1:self%n_part+n_part_out-1) = &
                   part_out(2:n_part_out)
@@ -573,6 +574,8 @@ contains
   subroutine add_part(self, part)
     class(PC_t), intent(inout)  :: self
     type(PC_part_t), intent(in) :: part
+
+    call self%check_space(self%n_part + 1)
     self%n_part                 = self%n_part + 1
     self%particles(self%n_part) = part
   end subroutine add_part
@@ -740,8 +743,11 @@ contains
   subroutine check_space(self, n_req)
     class(PC_t), intent(in) :: self
     integer, intent(in) :: n_req
+
     if (n_req > size(self%particles)) then
-       print *, "Particle list too small!"
+       print *, "Error: particle list too small"
+       print *, "Size of list:                 ", size(self%particles)
+       print *, "Number of particles required: ", n_req
        stop
     end if
   end subroutine check_space
@@ -1153,6 +1159,8 @@ contains
 
        ! Send particles from i_max to i_min
        n_send = min(n_max - n_avg, n_avg - n_min)
+       call pcs(i_min)%check_space(n_min+n_send)
+
        pcs(i_min)%particles(n_min+1:n_min+n_send) = &
             pcs(i_max)%particles(n_max-n_send+1:n_max)
 
@@ -1220,6 +1228,7 @@ contains
           if (io /= ip) then
              ! Insert at owner
              new_loc = pcs(io)%n_part + 1
+             call pcs(io)%check_space(new_loc)
              pcs(io)%particles(new_loc) = pcs(ip)%particles(ll)
              pcs(io)%n_part = new_loc
              call remove_part(pcs(ip), ll)
