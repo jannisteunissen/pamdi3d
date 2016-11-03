@@ -1,10 +1,18 @@
-particle_core
-=============
+# Particle_core
 
-This contains the basic parts for a particle simulation of (streamer)
-discharges, although most things are quite general.
+A collection of modules that make up the basic parts for a particle simulation.
 
-Depends on:
- - fosito
+# Compilation
 
-TODO: add more
+    make
+
+# Requirements
+
+* Gfortran 4.8 or newer (a recent ifort should also work if you modify the
+  makefiles)
+
+
+
+
+
+
