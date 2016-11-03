@@ -44,12 +44,12 @@ module m_particle_core
      integer                      :: n_colls
      integer, allocatable         :: ionization_colls(:)
      integer, allocatable         :: attachment_colls(:)
-     type(LT_table_t)             :: rate_lt
+     type(lookup_table_t)         :: rate_lt
      real(dp)                     :: max_rate, inv_max_rate
      type(LL_int_head_t)          :: clean_list
      real(dp)                     :: mass
      type(RNG_t)                  :: rng
-     integer                      :: separator(100)  ! Separate rng data
+     integer                      :: separator(100) ! Separate rng data
 
      procedure(p_to_logic_f), pointer, nopass :: outside_check => null()
      procedure(coll_callback_p), pointer      :: coll_callback => null()
@@ -159,6 +159,9 @@ contains
     integer, intent(in)           :: n_part_max
     integer, intent(in), optional :: rng_seed(4)
 
+    integer, parameter            :: i8 = selected_int_kind(18)
+    integer(i8)                   :: rng_seed_8byte(2)
+
     if (size(cross_secs) < 1) then
        print *, "No cross sections given, will abort"
        stop
@@ -169,9 +172,10 @@ contains
     self%n_part = 0
 
     if (present(rng_seed)) then
-       call self%rng%set_seed(rng_seed)
+       rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
+       call self%rng%set_seed(rng_seed_8byte)
     else
-       call self%rng%set_seed((/1, 3, 3, 1337/))
+       call self%rng%set_seed([8972134_i8, 21384823409_i8])
     end if
 
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
@@ -187,8 +191,10 @@ contains
     character(len=*), intent(in)  :: param_file, lt_file
     integer, intent(in), optional :: rng_seed(4)
 
-    integer                      :: my_unit
-    integer                      :: n_part_max
+    integer, parameter            :: i8 = selected_int_kind(18)
+    integer(i8)                   :: rng_seed_8byte(2)
+    integer                       :: my_unit
+    integer                       :: n_part_max
 
     open(newunit=my_unit, file=trim(param_file), form='UNFORMATTED', &
          access='STREAM', status='OLD')
@@ -207,9 +213,10 @@ contains
     call LT_from_file(self%rate_lt, lt_file)
 
     if (present(rng_seed)) then
-       call self%rng%set_seed(rng_seed)
+       rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
+       call self%rng%set_seed(rng_seed_8byte)
     else
-       call self%rng%set_seed((/1, 3, 3, 1337/))
+       call self%rng%set_seed([8972134_i8, 21384823409_i8])
     end if
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
@@ -312,7 +319,7 @@ contains
 
     do
        ! Get the next collision time
-       coll_time = sample_coll_time(self%rng%uni_01(), self%inv_max_rate)
+       coll_time = sample_coll_time(self%rng%unif_01(), self%inv_max_rate)
        if (coll_time > self%particles(ll)%t_left) exit
 
        ! Set x,v at the collision time
@@ -327,7 +334,7 @@ contains
 
        new_vel = norm2(self%particles(ll)%v)
        cIx     = get_coll_index(self%rate_lt, self%n_colls, self%max_rate, &
-            new_vel, self%rng%uni_01())
+            new_vel, self%rng%unif_01())
 
        if (cIx > 0) then
           ! Perform the corresponding collision
@@ -377,24 +384,24 @@ contains
 
   !> Returns a sample from the exponential distribution of the collision times
   ! RNG_uniform() is uniform on [0,1), but log(0) = nan, so we take 1 - RNG_uniform()
-  real(dp) function sample_coll_time(uni_01, inv_max_rate)
-    real(dp), intent(in) :: uni_01, inv_max_rate
-    sample_coll_time = -log(1 - uni_01) * inv_max_rate
+  real(dp) function sample_coll_time(unif_01, inv_max_rate)
+    real(dp), intent(in) :: unif_01, inv_max_rate
+    sample_coll_time = -log(1 - unif_01) * inv_max_rate
   end function sample_coll_time
 
   integer function get_coll_index(rate_lt, n_colls, max_rate, &
        velocity, rand_unif)
     use m_find_index
-    type(LT_table_t), intent(in) :: rate_lt
-    real(dp), intent(IN)         :: velocity, rand_unif, max_rate
-    integer, intent(in)          :: n_colls
-    real(dp)                     :: rand_rate
-    real(dp)                     :: buffer(PC_max_num_coll)
+    type(lookup_table_t), intent(in) :: rate_lt
+    real(dp), intent(IN)             :: velocity, rand_unif, max_rate
+    integer, intent(in)              :: n_colls
+    real(dp)                         :: rand_rate
+    real(dp)                         :: buffer(PC_max_num_coll)
 
     ! Fill an array with interpolated rates
     buffer(1:n_colls) = LT_get_mcol(rate_lt, velocity)
     rand_rate         = rand_unif * max_rate
-    get_coll_index    = FI_adaptive_r(buffer(1:n_colls), rand_rate)
+    get_coll_index    = find_index_adaptive(buffer(1:n_colls), rand_rate)
 
     ! If there was no collision, the index exceeds the list and is set to 0
     if (get_coll_index == n_colls+1) get_coll_index = 0
@@ -490,8 +497,8 @@ contains
 
     ! Marsaglia method for uniform sampling on sphere
     do
-       rands(1) = rng%uni_ab(-1.0_dp, 1.0_dp)
-       rands(2) = rng%uni_ab(-1.0_dp, 1.0_dp)
+       rands(1) = 2 * rng%unif_01() - 1
+       rands(2) = 2 * rng%unif_01() - 1
        sum_sq   = rands(1)**2 + rands(2)**2
        if (sum_sq <= 1) exit
     end do
@@ -1036,7 +1043,7 @@ contains
     type(PC_part_t), intent(out) :: part_out
     type(RNG_t), intent(inout) :: rng
 
-    if (rng%uni_01() > part_a%w / (part_a%w + part_b%w)) then
+    if (rng%unif_01() > part_a%w / (part_a%w + part_b%w)) then
        part_out%x      = part_b%x
        part_out%v      = part_b%v
        part_out%a      = part_b%a
