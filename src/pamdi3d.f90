@@ -343,10 +343,10 @@ program pamdi3d
 
         if (myrank == root) then
            call system_clock(COUNT=WCTime_current)
-           write(*, FMT = "((I7),(A),(es10.4e2),(A),(es10.2e2),(A),(es10.2e2))") &
+           write(*, FMT = "(I7,A,es11.4e2,A,es11.2e2,A,es11.2e2)") &
                 n_output, "   t(s): ", sim_time, "   dt: ", dt_next, &
                 "   dtPS", dt_fld
-           write(*, FMT = "((A)(es10.2e2)(A),(I12),(A),(es10.2e2),(A),(es10.4e2))") &
+           write(*, FMT = "(A,es11.2e2,A,I12,A,es11.2e2,A,es11.4e2)") &
                 "       WC t(s): ", &
                 & (WCTime_current - WCTime_start)/1.0D3, "   nPart:", n_part_sum, &
                 & "  nElec: ", n_elec_sum

@@ -3,7 +3,7 @@ module m_write_silo
    implicit none
    private
 
-   include 'silo.inc'
+   include 'silo_f9x.inc'
 
    integer, parameter :: dp      = kind(0.0d0)
    integer, parameter :: lineLen = 200

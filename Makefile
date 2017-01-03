@@ -22,11 +22,10 @@ $(CREATE_DIRS):
 $(CLEANSRC):
 		$(MAKE) -C $(@:clean-%=%) clean
 
-pamdi3d_libs:
-	tar -xzf pamdi3d_libs.tar.gz
-	make -C pamdi3d_libs all
+pamdi3d_libs/ready:
+	make -C pamdi3d_libs
 
 # Dependecy information
-$(SRC_DIRS):	| pamdi3d_libs
+$(SRC_DIRS):	| pamdi3d_libs/ready
 src:		fosito particle_core
 particle_core: 	fosito

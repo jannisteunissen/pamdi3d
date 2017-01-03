@@ -557,7 +557,7 @@ contains
           end do
        case (CFG_real_type)
           do j = 1, cfg%vars(i)%p_size
-             write(myUnit, ADVANCE = "NO", ERR = 999, FMT = "(E10.4, A) ") cfg%vars(i)%real_data(j), "  "
+             write(myUnit, ADVANCE = "NO", ERR = 999, FMT = "(E11.4, A) ") cfg%vars(i)%real_data(j), "  "
           end do
        case (CFG_char_type)
           do j = 1, cfg%vars(i)%p_size

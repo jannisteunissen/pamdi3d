@@ -620,7 +620,7 @@ contains
     logical                                 :: found_grid
     integer, allocatable                    :: ref_ixs(:, :)
     type(box_t), allocatable                :: box_list(:)
-    integer, parameter                      :: v_ixs(*) = &
+    integer, parameter                      :: v_ixs(5) = &
          (/E_i_pion, E_i_nion, E_i_O2m, E_i_elec, E_i_gamma/)
 
     if (associated(amr_grid%children) .or. amr_grid%n_child > 0) then

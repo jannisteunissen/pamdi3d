@@ -1,5 +1,3 @@
-FC 	:= mpif90
-FFLAGS	:= -Wall -O2
 OBJS	:= m_particle.o m_efield_amr.o m_init_cond.o m_electrode.o\
 	 m_write_silo.o m_misc_process.o m_phys_domain.o m_photoi.o
 
@@ -9,15 +7,7 @@ LIBDIRS := ../fosito ../particle_core  ../pamdi3d_libs/fishpack4.1/lib\
  ../pamdi3d_libs/silo_lib/lib
 LIBS	:= particle_core fosito fishpack silo
 
-ifeq ($(DEBUG), 1)
-	FFLAGS += -fcheck=all -g -ffpe-trap=invalid,zero,overflow
-endif
-
-%.o: 	%.f90
-	$(FC) -c -o $@ $< $(FFLAGS) $(addprefix -I,$(INCDIRS))
-
-../%:	%.o
-	$(FC) -o $@ $^ $(FFLAGS) $(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS))
+include ../makerules.make
 
 .PHONY: all clean
 
