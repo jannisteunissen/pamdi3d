@@ -23,3 +23,6 @@ test:	$(TESTS)
 
 clean:
 	$(RM) *.o *.mod $(TESTS)
+
+# Dependencies
+$(TESTS): ../src/libparticle_core.a
