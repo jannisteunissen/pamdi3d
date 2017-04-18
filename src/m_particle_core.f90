@@ -41,6 +41,10 @@ module m_particle_core
      real(dp) :: t_left = 0     !< Propagation time left
   end type PC_part_t
 
+  type, public :: callback_t
+     procedure(coll_callback_p), pointer, nopass :: ptr => null()
+  end type callback_t
+
   !> Particle core type, storing the particles and the collisions
   type, public                    :: PC_t
      !> Array storing the particles
@@ -81,8 +85,11 @@ module m_particle_core
      !> they are outside the computational domain
      procedure(p_to_logic_f), pointer, nopass :: outside_check  => null()
 
-     !> If assigned, call this method after a collision has occurred
-     procedure(coll_callback_p), pointer      :: coll_callback  => null()
+     !> If assigned, call this method after an ionization has occurred
+     type(callback_t), allocatable :: ionization_callbacks(:)
+
+     !> If assigned, call this method after an attachment has occurred
+     type(callback_t), allocatable :: attachment_callbacks(:)
 
      !> If assigned, use this method as the particle mover
      procedure(subr_mover), pointer, nopass   :: particle_mover => null()
@@ -140,9 +147,8 @@ module m_particle_core
   end type PC_bin_t
 
   abstract interface
-     subroutine coll_callback_p(self, my_part, c_ix, c_type)
+     subroutine coll_callback_p(my_part, c_ix, c_type)
        import
-       class(PC_t), intent(inout)  :: self
        type(PC_part_t), intent(in) :: my_part
        integer, intent(in)         :: c_ix, c_type
      end subroutine coll_callback_p
@@ -218,6 +224,13 @@ contains
     self%mass   = mass
     self%n_part = 0
 
+    ! No callbacks by default
+    if (.not. allocated(self%ionization_callbacks)) &
+         allocate(self%ionization_callbacks(0))
+
+    if (.not. allocated(self%attachment_callbacks)) &
+         allocate(self%attachment_callbacks(0))
+
     if (present(rng_seed)) then
        rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
        call self%rng%set_seed(rng_seed_8byte)
@@ -230,7 +243,6 @@ contains
     else
        self%particle_mover => PC_verlet_advance
     end if
-
 
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
 
@@ -354,7 +366,7 @@ contains
     use m_cross_sec
     class(PC_t), intent(inout) :: self
     integer, intent(in)        :: ll
-    integer                    :: cIx, cType, n_part_out
+    integer                    :: cIx, cType, n, n_part_out
     real(dp)                   :: coll_time, new_vel
     integer, parameter         :: max_num_part_out = 2
     type(PC_part_t)            :: part_out(max_num_part_out)
@@ -390,13 +402,14 @@ contains
           ! Perform the corresponding collision
           cType   = self%colls(cIx)%type
 
-          if (associated(self%coll_callback)) &
-               call self%coll_callback(self%particles(ll), cIx, cType)
-
           select case (cType)
           case (CS_attach_t)
              call attach_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
+             do n = 1, size(self%attachment_callbacks)
+                call self%attachment_callbacks(n)%ptr(&
+                     self%particles(ll), cIx, cType)
+             end do
           case (CS_elastic_t)
              call elastic_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
@@ -406,6 +419,10 @@ contains
           case (CS_ionize_t)
              call ionization_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
+             do n = 1, size(self%ionization_callbacks)
+                call self%ionization_callbacks(n)%ptr(&
+                     self%particles(ll), cIx, cType)
+             end do
           case default
              stop "Wrong collision type"
           end select
