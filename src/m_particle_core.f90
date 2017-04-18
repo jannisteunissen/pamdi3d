@@ -138,6 +138,9 @@ module m_particle_core
 
      procedure, non_overridable :: init_from_file
      procedure, non_overridable :: to_file
+     
+     procedure, non_overridable :: add_ionization_callback
+     procedure, non_overridable :: add_attachment_callback
   end type PC_t
 
   type, abstract, public :: PC_bin_t
@@ -249,6 +252,52 @@ contains
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
   end subroutine initialize
+  
+  !> Adds an ionization callback to current list of ionization callbacks
+  subroutine add_ionization_callback(self,new_ionization_callback_pptr)
+    class(PC_t), intent(inout)    :: self
+    procedure(coll_callback_p)    :: new_ionization_callback_pptr
+    
+    type(callback_t)              :: new_ionization_callback
+    type(callback_t), allocatable :: old_callback_list(:)
+    integer                       :: nn
+    
+    new_ionization_callback%ptr => new_ionization_callback_pptr
+    if (allocated(self%ionization_callbacks)) then
+      nn = size(self%ionization_callbacks)
+      allocate(old_callback_list(nn))
+      deallocate(self%ionization_callbacks)
+      allocate(self%ionization_callbacks(nn+1))
+      self%ionization_callbacks(1:nn)=old_callback_list
+      self%ionization_callbacks(nn+1)=new_ionization_callback
+    else
+      allocate(self%ionization_callbacks(1))
+      self%ionization_callbacks = new_ionization_callback
+    end if    
+  end subroutine add_ionization_callback
+  
+  !> Adds an attachment callback to current list of attachment callbacks
+  subroutine add_attachment_callback(self,new_attachment_callback_pptr)
+    class(PC_t), intent(inout)    :: self
+    procedure(coll_callback_p)    :: new_attachment_callback_pptr
+    
+    type(callback_t)              :: new_attachment_callback
+    type(callback_t), allocatable :: old_callback_list(:)
+    integer                       :: nn
+    
+    new_attachment_callback%ptr=>new_attachment_callback_pptr
+    if (allocated(self%attachment_callbacks)) then
+      nn = size(self%attachment_callbacks)
+      allocate(old_callback_list(nn))
+      deallocate(self%attachment_callbacks)
+      allocate(self%attachment_callbacks(nn+1))
+      self%attachment_callbacks(1:nn)=old_callback_list
+      self%attachment_callbacks(nn+1)=new_attachment_callback
+    else
+      allocate(self%attachment_callbacks(1))
+      self%attachment_callbacks = new_attachment_callback
+    end if    
+  end subroutine add_attachment_callback
 
   !> Initialization routine for the particle module
   subroutine init_from_file(self, param_file, lt_file, rng_seed)
