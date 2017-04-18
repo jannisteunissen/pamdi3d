@@ -1,0 +1,12 @@
+*.cfg
+.DS_Store
+*~
+*.o
+*.mod
+*.a
+*.exe
+*.silo
+*.cfg
+*config.md
+test_m_cross_sec
+test_m_particle_core
