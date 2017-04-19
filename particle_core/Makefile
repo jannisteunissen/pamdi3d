@@ -1,25 +1,19 @@
-OBJS	:= m_gas.o m_particle_core.o m_particle_par.o m_cross_sec.o kdtree2.o
+SRC_DIRS	:= src tests
 
-INCDIRS	:= ../fosito
+# Directories with altered names (useful for cleaning)
+CLEANSRC	:= $(SRC_DIRS:%=clean-%)
 
-include ../makerules.make
+.PHONY:	all clean $(SRC_DIRS) $(CLEANSRC)
 
-.PHONY: all test clean
+all:	$(SRC_DIRS)
 
-all: 	libparticle_core.a
+clean:	$(CLEANSRC)
 
-libparticle_core.a: $(OBJS)
-	$(RM) $@
-	$(AR) rcs $@ $^
+$(SRC_DIRS):
+	@$(MAKE) -C $@
 
-
-test: 	libparticle_core.a
-	$(MAKE) -C test
-
-clean:
-	$(RM) -f *.o *.mod libparticle_core.a
-	$(MAKE) -C test clean
+$(CLEANSRC):
+	$(MAKE) -C $(@:clean-%=%) clean
 
 # Dependency information
-m_particle_core.o:	m_cross_sec.o kdtree2.o
-m_particle_par.o:	m_particle_core.o
+tests: src
