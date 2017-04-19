@@ -66,15 +66,16 @@ contains
   subroutine UC_xyz_to_spherical(xyz, radius, theta, phi)
     real(dp), intent(in) :: xyz(3)
     real(dp), intent(out) :: radius, theta, phi
+    real(dp), parameter :: eps = epsilon(1.0_dp)
 
-    if (xyz(1) == 0.0_dp .and. xyz(2) == 0.0_dp) then
+    if (all(abs(xyz(1:2)) < eps)) then
        phi = 0.0_dp
     else
        phi = atan2(xyz(2), xyz(1))
     end if
 
     radius = sqrt(sum(xyz**2))
-    if (radius == 0.0_dp) then      ! Undefined
+    if (radius > eps) then      ! Undefined
        theta = acos(xyz(3) / radius)
     else
        theta = 0.0_dp

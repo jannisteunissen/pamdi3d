@@ -96,11 +96,12 @@ contains
   function two_normals(self) result(rands)
     class(RNG_t), intent(inout) :: self
     real(dp)                    :: rands(2), sum_sq
+
     do
        rands(1) = self%uni_ab(-1.0_dp, 1.0_dp)
        rands(2) = self%uni_ab(-1.0_dp, 1.0_dp)
        sum_sq = sum(rands**2)
-       if (sum_sq < 1.0_dp .and. sum_sq /= 0.0_dp) exit
+       if (sum_sq < 1.0_dp .and. sum_sq > 0.0_dp) exit
     end do
     rands = rands * sqrt(-2 * log(sum_sq) / sum_sq)
   end function two_normals
