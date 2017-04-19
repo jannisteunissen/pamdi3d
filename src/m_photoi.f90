@@ -76,7 +76,7 @@ contains
 
     pi_quench_fac = (30.0D0 * UC_torr_to_bar) / &
          (GAS_pressure + (30.0D0 * UC_torr_to_bar))
-    if (present(quench_fac)) pi_quench_fac = pi_quench_fac
+    if (present(quench_fac)) pi_quench_fac = quench_fac
     
     
     if (present(min_inv_abs_len_resc)) then
@@ -108,6 +108,15 @@ contains
     end if  
 
     call pi_pc%add_ionization_callback(ionization_do_photoi)
+    
+    write(*,'(A,F8.1,A,F8.1,A)') "** Photo ionization is initialized **"
+    write(*,'(A,F8.1,A,F8.1,A)') "The photon mean free path (non-uniformly distributed) ranges between:", &
+    1.0/get_photoi_lambda(1.0d0)*1.0d3," mm",&
+    1.0/get_photoi_lambda(0.0d0)*1.0d3," mm"
+   
+    write(*,'(A,F8.1,A,F8.1,A)') "The mean photon ionization conversion rate (efficiency times quench_fac) ranges between:", &
+    minval(pi_photo_eff_table(2,:)) * pi_quench_fac * 100,"% and",&
+    minval(pi_photo_eff_table(2,:)) * pi_quench_fac * 100,"%"
   end subroutine PI_initialize
   
   !> Ionization callback procedure
@@ -137,7 +146,7 @@ contains
        my_new_part%x(2)   = my_part%x(2) + fly_len * sin(chi) * sin(psi)
        my_new_part%x(3)   = my_part%x(3) + fly_len * cos(chi)
        my_new_part%v      = [0.0D0, 0.0D0, 0.0D0]
-       my_new_part%a      = [0.0D0, 0.0D0, 0.0D0]
+       my_new_part%a      = my_part%a
        my_new_part%w      = 1.0D0
        my_new_part%t_left = 0.0D0
        

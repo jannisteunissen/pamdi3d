@@ -9,8 +9,8 @@ program test_m_photoi
 
   integer, parameter :: dp = kind(0.0d0)
   
-  integer                        :: init_num_part = 20000
-  integer                        :: max_num_steps = 100
+  integer                        :: init_num_part = 1000
+  integer                        :: max_num_steps = 10000
   real(dp)                       :: delta_t = 1.0d-11
   integer                        :: lookup_table_size = 10000
   real(dp)                       :: max_energy_eV = 1000.0D0
@@ -26,8 +26,13 @@ program test_m_photoi
   type(CS_t), allocatable        :: cross_secs(:)
   type(PC_t)                     :: pc
   
-  real(dp)                    :: efield, wall, av_pos1,av_pos2
+  real(dp)                    :: efield
   integer                    :: ll, step, n
+  
+  real(dp)                               :: quench_fac
+  real(dp)                               :: min_inv_abs_len_resc, max_inv_abs_len_resc
+  integer                                :: size_photo_eff_table
+  real(dp), dimension(:, :), allocatable :: photo_eff_table
   
 
   print *, "Testing m_photoi.f90 implementation"
@@ -46,8 +51,24 @@ program test_m_photoi
           gas_fracs(n) * GAS_number_dens, max_energy_eV, cross_secs)
   end do
   
-  call PI_initialize(pc) ! default values are taken defined inside PI_initialize
-
+  
+  min_inv_abs_len_resc = 2.0D3 / GAS_get_fraction("O2") / GAS_pressure
+  max_inv_abs_len_resc = 2.0D3 / GAS_get_fraction("O2") / GAS_pressure  
+  
+  size_photo_eff_table = 2
+  allocate(photo_eff_table(2,size_photo_eff_table))
+  photo_eff_table(1,:) = [0.0d0,   1d8] ! for any field
+  photo_eff_table(2,:) = [1.0d0, 1.0d0] ! an efficiency 1 per ionization
+  quench_fac = 1.0d0
+  
+  call PI_initialize(pc,                &
+                     quench_fac,           &
+                     min_inv_abs_len_resc, &
+                     max_inv_abs_len_resc, &
+                     size_photo_eff_table, &
+                     photo_eff_table)
+                     
+   
   print *, "Initializing particle module"
   call pc%initialize(    UC_elec_mass, & ! mass of particle
   &                        cross_secs, & ! cross section list
@@ -57,26 +78,27 @@ program test_m_photoi
   pc%outside_check => part_outside_check
 
   
-  efield = 4.0d6
-  wall = 0.0d0
+  efield = 3.5d6
   do ll = 1, init_num_part
-    call pc%create_part( [ 0.0D0, 0.0D0, 2.0D-5], & ! position (m)
+    call pc%create_part( [ 0.0D0, 0.0D0, 1.0D-4], & ! position (m)
     &                    [ 0.0D0, 0.0D0, 0.0D0], & ! velocity (m/s)
     &                    [ 0.0_dp, 0.0_dp, efield*UC_elec_q_over_m], & ! accelaration (m/s2)
     &                                       1.0D0, & ! weight
     &                                       0.0D0)   ! time left for move_and_collide (s)
   end do
 
-  if (pc%n_part>0.0d0) write(*,'(A10,A10,A10,A10,A10)') &
-  "Time (ns)", "Number","v (mm/ns)", "zmin (mm)"
+  if (pc%n_part>0.0d0) write(*,'(A14,A14,A14,A14,A14)') &
+  "Time (ns)", "Number","zmin (mm)", "z_av (mm)", "zmax (mm)"
   do step = 1, max_num_steps
-     if (pc%n_part>1) then
-       av_pos1 = sum(pc%particles(1:pc%n_part)%x(3))/pc%n_part
+     if (pc%n_part>1 .and. mod(step,10).eq.0) then
+
        call pc%advance(delta_t)
-       av_pos2 = sum(pc%particles(1:pc%n_part)%x(3))/pc%n_part
-       write(*,'(F10.2,I10,F10.2,F10.2)') &
-       step*delta_t*1.0d9, pc%n_part, (av_pos2-av_pos1)/delta_t*1.0d-6, &
-       minval(pc%particles(1:pc%n_part)%x(3))*1.0d3
+ 
+       write(*,'(F14.1,I14,F14.3,F14.3,F14.3)') &
+       step*delta_t*1.0d9, pc%n_part, &
+       minval(pc%particles(1:pc%n_part)%x(3))*1.0d3, &
+       sum(pc%particles(1:pc%n_part)%x(3))/pc%n_part,&
+       maxval(pc%particles(1:pc%n_part)%x(3))*1.0d3
      end if
   end do
 
@@ -87,6 +109,6 @@ contains
     type(PC_part_t), intent(in) :: my_part
 
     part_outside_check = .false.
-    if ( my_part%x(3)<wall) part_outside_check=.true.
+    if ( my_part%x(3)<0.0d0) part_outside_check=.true.
   end function part_outside_check
 end program test_m_photoi
