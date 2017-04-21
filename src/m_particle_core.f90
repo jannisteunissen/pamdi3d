@@ -265,11 +265,13 @@ contains
     new_ionization_callback%ptr => new_ionization_callback_pptr
     if (allocated(self%ionization_callbacks)) then
       nn = size(self%ionization_callbacks)
+      if (nn>0) then
       allocate(old_callback_list(nn))
       deallocate(self%ionization_callbacks)
       allocate(self%ionization_callbacks(nn+1))
       self%ionization_callbacks(1:nn)=old_callback_list
       self%ionization_callbacks(nn+1)=new_ionization_callback
+      end if
     else
       allocate(self%ionization_callbacks(1))
       self%ionization_callbacks = new_ionization_callback
@@ -288,11 +290,13 @@ contains
     new_attachment_callback%ptr=>new_attachment_callback_pptr
     if (allocated(self%attachment_callbacks)) then
       nn = size(self%attachment_callbacks)
+      if (nn>0) then
       allocate(old_callback_list(nn))
       deallocate(self%attachment_callbacks)
       allocate(self%attachment_callbacks(nn+1))
       self%attachment_callbacks(1:nn)=old_callback_list
       self%attachment_callbacks(nn+1)=new_attachment_callback
+      end if
     else
       allocate(self%attachment_callbacks(1))
       self%attachment_callbacks = new_attachment_callback
