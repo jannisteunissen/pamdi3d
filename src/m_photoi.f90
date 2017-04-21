@@ -50,7 +50,7 @@ contains
                            photo_eff_table,      &
                            rng_seed)
    type(PC_t), intent(in)                      :: my_pc
-   real(dp), intent(in), optional              :: quench_fac
+   real(dp), intent(in), optional              :: quench_fac_shift
    real(dp), intent(in), optional              :: min_inv_abs_len_resc
    real(dp), intent(in), optional              :: max_inv_abs_len_resc
    integer, intent(in), optional               :: size_photo_eff_table
@@ -76,7 +76,10 @@ contains
 
     pi_quench_fac = (30.0D0 * UC_torr_to_bar) / &
          (GAS_pressure + (30.0D0 * UC_torr_to_bar))
-    if (present(quench_fac)) pi_quench_fac = quench_fac
+    if (present(quench_fac_shift)) then
+      pi_quench_fac = (quench_fac_shift * UC_torr_to_bar) / &
+           (GAS_pressure + (quench_fac_shift * UC_torr_to_bar))
+    end if
     
     
     if (present(min_inv_abs_len_resc)) then
