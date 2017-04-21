@@ -43,7 +43,7 @@ contains
   
   !> After the first argument, if argument is present then overwrite default
   subroutine PI_initialize(my_pc,                &
-                           quench_fac,           &
+                           quench_fac_shift,     &
                            min_inv_abs_len_resc, &
                            max_inv_abs_len_resc, &
                            size_photo_eff_table, &
