@@ -116,10 +116,10 @@ contains
     write(*,'(A,F8.1,A,F8.1,A)') "The photon mean free path (non-uniformly distributed) ranges between:", &
     1.0/get_photoi_lambda(1.0d0)*1.0d3," mm",&
     1.0/get_photoi_lambda(0.0d0)*1.0d3," mm"
-   
-    write(*,'(A,F8.1,A,F8.1,A)') "The mean photon ionization conversion rate (efficiency times quench_fac) ranges between:", &
+
+    write(*,'(A,F9.3,A,F9.3,A)') "The mean photon ionization conversion rate (efficiency times quench_fac) ranges between:", &
     minval(pi_photo_eff_table(2,:)) * pi_quench_fac * 100,"% and",&
-    minval(pi_photo_eff_table(2,:)) * pi_quench_fac * 100,"%"
+    maxval(pi_photo_eff_table(2,:)) * pi_quench_fac * 100,"%"
   end subroutine PI_initialize
   
   !> Ionization callback procedure
