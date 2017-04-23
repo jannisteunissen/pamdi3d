@@ -84,6 +84,11 @@ module m_particle_core
      !> If assigned, call this method after moving particles, to check whether
      !> they are outside the computational domain
      procedure(p_to_logic_f), pointer, nopass :: outside_check  => null()
+     
+     !> If assigned, call this method after moving particles, to check whether
+     !> they are inside an object, if true, call all attachment_callbacks 
+     !> and delete particle thereafter
+     procedure(p_to_logic_f), pointer, nopass :: inside_check  => null()
 
      !> If assigned, call this method after an ionization has occurred
      type(callback_t), allocatable :: ionization_callbacks(:)
@@ -138,6 +143,9 @@ module m_particle_core
 
      procedure, non_overridable :: init_from_file
      procedure, non_overridable :: to_file
+     
+     procedure, non_overridable :: add_ionization_callback
+     procedure, non_overridable :: add_attachment_callback
   end type PC_t
 
   type, abstract, public :: PC_bin_t
@@ -249,6 +257,66 @@ contains
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
   end subroutine initialize
+  
+  !> Adds an ionization callback to current list of ionization callbacks
+  subroutine add_ionization_callback(self,new_ionization_callback_pptr)
+    class(PC_t), intent(inout)    :: self
+    procedure(coll_callback_p)    :: new_ionization_callback_pptr
+    
+    type(callback_t)              :: new_ionization_callback
+    type(callback_t), allocatable :: old_callback_list(:)
+    integer                       :: nn
+    
+    new_ionization_callback%ptr => new_ionization_callback_pptr
+    if (allocated(self%ionization_callbacks)) then
+      nn = size(self%ionization_callbacks)
+      if (nn.gt.0) then
+        allocate(old_callback_list(nn))
+        old_callback_list = self%ionization_callbacks
+        deallocate(self%ionization_callbacks)
+        allocate(self%ionization_callbacks(nn+1))
+        self%ionization_callbacks(1:nn)=old_callback_list
+        self%ionization_callbacks(nn+1)=new_ionization_callback
+      elseif (nn.eq.0) then
+        deallocate(self%ionization_callbacks)
+        allocate(self%ionization_callbacks(1))
+        self%ionization_callbacks = new_ionization_callback
+      end if
+    else
+      allocate(self%ionization_callbacks(1))
+      self%ionization_callbacks = new_ionization_callback
+    end if    
+  end subroutine add_ionization_callback
+  
+  !> Adds an attachment callback to current list of attachment callbacks
+  subroutine add_attachment_callback(self,new_attachment_callback_pptr)
+    class(PC_t), intent(inout)    :: self
+    procedure(coll_callback_p)    :: new_attachment_callback_pptr
+    
+    type(callback_t)              :: new_attachment_callback
+    type(callback_t), allocatable :: old_callback_list(:)
+    integer                       :: nn
+    
+    new_attachment_callback%ptr => new_attachment_callback_pptr
+    if (allocated(self%attachment_callbacks)) then
+      nn = size(self%attachment_callbacks)
+      if (nn.gt.0) then
+        allocate(old_callback_list(nn))
+        old_callback_list = self%attachment_callbacks
+        deallocate(self%attachment_callbacks)
+        allocate(self%attachment_callbacks(nn+1))
+        self%attachment_callbacks(1:nn)=old_callback_list
+        self%attachment_callbacks(nn+1)=new_attachment_callback
+      elseif (nn.eq.0) then
+        deallocate(self%attachment_callbacks)
+        allocate(self%attachment_callbacks(1))
+        self%attachment_callbacks = new_attachment_callback
+      end if
+    else
+      allocate(self%attachment_callbacks(1))
+      self%attachment_callbacks = new_attachment_callback
+    end if
+  end subroutine add_attachment_callback
 
   !> Initialization routine for the particle module
   subroutine init_from_file(self, param_file, lt_file, rng_seed)
@@ -386,6 +454,17 @@ contains
 
        ! Move particle to collision time
        call self%particle_mover(self%particles(ll), coll_time)
+
+       if (associated(self%inside_check)) then
+          if (self%inside_check(self%particles(ll))) then
+            do n = 1, size(self%attachment_callbacks)
+               call self%attachment_callbacks(n)%ptr(&
+                    self%particles(ll), cIx, cType)
+            end do
+            call self%remove_part(ll)
+            go to 100
+          end if
+       end if
 
        if (associated(self%outside_check)) then
           if (self%outside_check(self%particles(ll))) then
