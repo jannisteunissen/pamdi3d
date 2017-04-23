@@ -84,6 +84,11 @@ module m_particle_core
      !> If assigned, call this method after moving particles, to check whether
      !> they are outside the computational domain
      procedure(p_to_logic_f), pointer, nopass :: outside_check  => null()
+     
+     !> If assigned, call this method after moving particles, to check whether
+     !> they are inside an object, if true, call all attachment_callbacks 
+     !> and delete particle thereafter
+     procedure(p_to_logic_f), pointer, nopass :: inside_check  => null()
 
      !> If assigned, call this method after an ionization has occurred
      type(callback_t), allocatable :: ionization_callbacks(:)
@@ -449,6 +454,17 @@ contains
 
        ! Move particle to collision time
        call self%particle_mover(self%particles(ll), coll_time)
+
+       if (associated(self%inside_check)) then
+          if (self%inside_check(self%particles(ll))) then
+            do n = 1, size(self%attachment_callbacks)
+               call self%attachment_callbacks(n)%ptr(&
+                    self%particles(ll), cIx, cType)
+            end do
+            call self%remove_part(ll)
+            go to 100
+          end if
+       end if
 
        if (associated(self%outside_check)) then
           if (self%outside_check(self%particles(ll))) then
