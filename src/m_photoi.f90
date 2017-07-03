@@ -30,26 +30,21 @@ module m_photoi
   real(dp)                               :: pi_min_inv_abs_len, pi_max_inv_abs_len
   real(dp), dimension(:, :), allocatable :: pi_photo_eff_table
   type(RNG_t)                            :: pi_rng
-    
-  type(PC_t), pointer                    :: pi_pc
-  
+      
   public :: PI_initialize
 contains
   
-  subroutine pi_link(my_pc)
-    type(PC_t), intent(in), target :: my_pc 
-    pi_pc => my_pc
-  end subroutine
-  
   !> After the first argument, if argument is present then overwrite default
-  subroutine PI_initialize(my_pc,                &
+  subroutine PI_initialize(num_pcs,              &
+                           my_pcs,               &
                            quench_fac_shift,     &
                            min_inv_abs_len_resc, &
                            max_inv_abs_len_resc, &
                            size_photo_eff_table, &
                            photo_eff_table,      &
                            rng_seed)
-   type(PC_t), intent(in)                      :: my_pc
+   integer,intent(in)                          :: num_pcs
+   type(PC_t), intent(inout), allocatable      :: my_pcs(:)
    real(dp), intent(in), optional              :: quench_fac_shift
    real(dp), intent(in), optional              :: min_inv_abs_len_resc
    real(dp), intent(in), optional              :: max_inv_abs_len_resc
@@ -59,8 +54,9 @@ contains
    
    integer, parameter            :: i8 = selected_int_kind(18)
    integer(i8)                   :: rng_seed_8byte(2)
+   integer                       :: i
 
-   call pi_link(my_pc)
+   if (.not.allocated(my_pcs)) stop
    
    !> Check if GAS is initialized
    if (GAS_initialized .eqv. .false.) then
@@ -110,7 +106,9 @@ contains
        call pi_rng%set_seed([8972134_i8, 21384823409_i8])
     end if  
 
-    call pi_pc%add_ionization_callback(ionization_do_photoi)
+    do i=1,num_pcs
+    call my_pcs(i)%add_ionization_callback(ionization_do_photoi)
+    end do
     
     write(*,'(A,F8.1,A,F8.1,A)') "** Photo ionization is initialized **"
     write(*,'(A,F8.1,A,F8.1,A)') "The photon mean free path (non-uniformly distributed) ranges between:", &
@@ -131,7 +129,7 @@ contains
     type(PC_part_t)                      :: my_new_part
     real(dp)                             :: mean_gammas, en_frac, fly_len
     real(dp)                             :: fld, psi, chi, x_end(3)
-    integer                              :: n, n_photons
+    integer                              :: n, n_photons, TID
 
 
     fld         = norm2(my_part%a / UC_elec_q_over_m)
@@ -153,8 +151,9 @@ contains
        my_new_part%w      = 1.0D0
        my_new_part%t_left = 0.0D0
        
-       if (pi_pc%outside_check(my_new_part) .eqv. .false.) then
-         call pi_pc%add_part(my_new_part)
+       !TODO: my_pcs(i) cannot be used here like this!
+       if (my_pcs(i)%outside_check(my_new_part) .eqv. .false.) then
+         call my_pcs(i)%add_part(my_new_part)
        end if
     end do
   end subroutine ionization_do_photoi
