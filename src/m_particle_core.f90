@@ -155,8 +155,11 @@ module m_particle_core
   end type PC_bin_t
 
   abstract interface
-     subroutine coll_callback_p(my_part, c_ix, c_type)
+
+     !> Interface for callbacks, which may for example add particles
+     subroutine coll_callback_p(self, my_part, c_ix, c_type)
        import
+       class(PC_t), intent(inout)  :: self
        type(PC_part_t), intent(in) :: my_part
        integer, intent(in)         :: c_ix, c_type
      end subroutine coll_callback_p
@@ -458,7 +461,7 @@ contains
        if (associated(self%inside_check)) then
           if (self%inside_check(self%particles(ll))) then
             do n = 1, size(self%attachment_callbacks)
-               call self%attachment_callbacks(n)%ptr(&
+               call self%attachment_callbacks(n)%ptr(self, &
                     self%particles(ll), cIx, cType)
             end do
             call self%remove_part(ll)
@@ -486,7 +489,7 @@ contains
              call attach_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
              do n = 1, size(self%attachment_callbacks)
-                call self%attachment_callbacks(n)%ptr(&
+                call self%attachment_callbacks(n)%ptr(self, &
                      self%particles(ll), cIx, cType)
              end do
           case (CS_elastic_t)
@@ -499,7 +502,7 @@ contains
              call ionization_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
              do n = 1, size(self%ionization_callbacks)
-                call self%ionization_callbacks(n)%ptr(&
+                call self%ionization_callbacks(n)%ptr(self, &
                      self%particles(ll), cIx, cType)
              end do
           case default

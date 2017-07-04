@@ -26,7 +26,7 @@ program test_m_photoi
   implicit none
 
   integer, parameter :: dp = kind(0.0d0)
-  
+
   integer                        :: init_num_part = 1000
   integer                        :: max_num_steps = 10000
   real(dp)                       :: delta_t = 1.0d-11
@@ -40,53 +40,52 @@ program test_m_photoi
   integer                        :: n_gas_comp = 2
   character(len=*), parameter     :: cs_file = "test_m_photoi_cs.txt"
 
-  
+
   type(CS_t), allocatable        :: cross_secs(:)
   type(PC_t)                     :: pc
-  
+
   real(dp)                    :: efield
   integer                    :: ll, step, n
-  
+
   real(dp)                               :: quench_fac
   real(dp)                               :: min_inv_abs_len_resc, max_inv_abs_len_resc
   integer                                :: size_photo_eff_table
   real(dp), dimension(:, :), allocatable :: photo_eff_table
-  
+
 
   print *, "Testing m_photoi.f90 implementation"
-  
+
   allocate(molecule_names(n_gas_comp))
   molecule_names = ["N2", "O2"]
   allocate(gas_fracs(n_gas_comp))
   gas_fracs = [0.8d0, 0.2d0]
   allocate(cross_files(n_gas_comp))
   cross_files = ["test_m_photoi_cs.txt", "test_m_photoi_cs.txt"]
-  
+
   ! Load GAS and cross sections, needed for photoi
   call GAS_initialize(molecule_names, gas_fracs, pressure, temperature)
   do n = 1, n_gas_comp
      call CS_add_from_file(cs_file, molecule_names(n), &
           gas_fracs(n) * GAS_number_dens, max_energy_eV, cross_secs)
   end do
-  
-  
+
   min_inv_abs_len_resc = 2.0D3 / GAS_get_fraction("O2") / GAS_pressure
-  max_inv_abs_len_resc = 2.0D3 / GAS_get_fraction("O2") / GAS_pressure  
-  
+  max_inv_abs_len_resc = 2.0D3 / GAS_get_fraction("O2") / GAS_pressure
+
   size_photo_eff_table = 2
   allocate(photo_eff_table(2,size_photo_eff_table))
   photo_eff_table(1,:) = [0.0d0,   1d8] ! for any field
   photo_eff_table(2,:) = [1.0d0, 1.0d0] ! an efficiency 1 per ionization
   quench_fac = 1.0d0
-  
-  call PI_initialize(pc,                &
-                     quench_fac,           &
+
+  call PI_initialize(quench_fac,           &
                      min_inv_abs_len_resc, &
                      max_inv_abs_len_resc, &
                      size_photo_eff_table, &
                      photo_eff_table)
-                     
-   
+
+  call pc%add_ionization_callback(PI_do_photoi)
+
   print *, "Initializing particle module"
   call pc%initialize(    UC_elec_mass, & ! mass of particle
   &                        cross_secs, & ! cross section list
@@ -95,7 +94,7 @@ program test_m_photoi
   &                   max_n_particles)  ! max number of particles
   pc%outside_check => part_outside_check
 
-  
+
   efield = 3.5d6
   do ll = 1, init_num_part
     call pc%create_part( [ 0.0D0, 0.0D0, 1.0D-4], & ! position (m)
@@ -111,7 +110,7 @@ program test_m_photoi
      if (pc%n_part>1 .and. mod(step,10).eq.0) then
 
        call pc%advance(delta_t)
- 
+
        write(*,'(F14.1,I14,F14.3,F14.3,F14.3)') &
        step*delta_t*1.0d9, pc%n_part, &
        minval(pc%particles(1:pc%n_part)%x(3))*1.0d3, &
