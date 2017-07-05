@@ -1,4 +1,4 @@
-SRC_DIRS	:= src tests
+SRC_DIRS	:= src
 
 # Directories with altered names (useful for cleaning)
 CLEANSRC	:= $(SRC_DIRS:%=clean-%)

@@ -1,4 +1,4 @@
-FC 	:= gfortran
+FC 	:= mpif90
 FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -g -O2 -fopenmp \
 	-fcheck=array-temps,bounds,do,mem,pointer
 TESTS	:= test_m_particle_core test_m_cross_sec test_m_photoi
