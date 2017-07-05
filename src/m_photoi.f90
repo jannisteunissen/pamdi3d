@@ -40,14 +40,12 @@ contains
                            min_inv_abs_len_resc, &
                            max_inv_abs_len_resc, &
                            size_photo_eff_table, &
-                           photo_eff_table,      &
-                           rng_seed)
+                           photo_eff_table)
    real(dp), intent(in), optional              :: quench_fac_shift
    real(dp), intent(in), optional              :: min_inv_abs_len_resc
    real(dp), intent(in), optional              :: max_inv_abs_len_resc
    integer, intent(in), optional               :: size_photo_eff_table
    real(dp), intent(in), allocatable,optional  :: photo_eff_table(:,:)
-   integer, intent(in), optional               :: rng_seed(4)
 
    !> Check if GAS is initialized
    if (GAS_initialized .eqv. .false.) then
