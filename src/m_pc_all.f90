@@ -5,7 +5,6 @@ module m_pc_all
   use m_cross_sec
   use m_gas
   use m_particle_core
-  use m_photoi
   use m_random ! external from lib rng_fortran
 
   implicit none
