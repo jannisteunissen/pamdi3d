@@ -528,6 +528,25 @@ contains
 
     ! Move particle to end of the time step
     call self%particle_mover(self%particles(ll), self%particles(ll)%t_left)
+    
+    !> one final check if it is inside the object or outside the domain
+    if (associated(self%inside_check)) then
+       if (self%inside_check(self%particles(ll))) then
+         do n = 1, size(self%attachment_callbacks)
+            call self%attachment_callbacks(n)%ptr(self, &
+                 self%particles(ll), cIx, cType)
+         end do
+         call self%remove_part(ll)
+         go to 100
+       end if
+    end if
+
+    if (associated(self%outside_check)) then
+       if (self%outside_check(self%particles(ll))) then
+          call self%remove_part(ll)
+          go to 100
+       end if
+    end if
 
 100 continue
   end subroutine move_and_collide
@@ -707,7 +726,7 @@ contains
 
   subroutine clean_up(self)
     class(PC_t), intent(inout) :: self
-    integer :: ix_end, ix_clean, n_part
+    integer :: ix_end, ix_clean, n_part, i
     logical :: success
 
     do
@@ -728,6 +747,15 @@ contains
           end if
        end do
     end do
+    
+    !> Added check to spot a continuing dead particle sooner
+    if ( sum(self%particles(1:self%n_part)%w) < self%n_part ) then
+      print *, "Cleaning didn't work...."
+      do i=1,self%n_part
+        if (self%particles(i)%w<1.0d0) print *, self%particles(i)%x, self%particles(i)%w
+      end do
+      stop
+    end if
   end subroutine clean_up
 
   subroutine add_part(self, part)
@@ -799,7 +827,13 @@ contains
   !> Return the number of real particles
   real(dp) function get_num_real_part(self)
     class(PC_t), intent(in) :: self
-    get_num_real_part = sum(self%particles(1:self%n_part)%w)
+    integer :: i
+      get_num_real_part = sum(self%particles(1:self%n_part)%w)
+      if (get_num_real_part<self%n_part) then
+        do i=1,self%n_part
+          print *, self%particles(i)%x, self%particles(i)%w
+        end do
+      end if
   end function get_num_real_part
 
   !> Return the number of simulation particles
