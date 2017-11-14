@@ -1,4 +1,4 @@
-SRC_DIRS	:= src fosito particle_core
+SRC_DIRS	:= src particle_core
 CREATE_DIRS	:= output
 
 # Directories with altered names (useful for cleaning)
@@ -27,5 +27,5 @@ pamdi3d_libs/ready:
 
 # Dependecy information
 $(SRC_DIRS):	| pamdi3d_libs/ready
-src:		fosito particle_core
-particle_core: 	fosito
+src:		particle_core
+
