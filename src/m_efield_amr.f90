@@ -90,7 +90,7 @@ contains
   subroutine E_initialize(cfg)
     use m_config
     use m_phys_domain
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(inout) :: cfg
     integer                 :: dyn_size, ref_size
 
     call CFG_get(cfg, "ref_min_grid_size", E_min_grid_size)

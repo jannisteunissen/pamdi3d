@@ -35,7 +35,7 @@ contains
   subroutine MISC_initialize(cfg)
     use m_config
     use m_gas
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(inout) :: cfg
     logical :: use_detach
 
     call CFG_get(cfg, "sim_use_o2m_detach", use_detach)

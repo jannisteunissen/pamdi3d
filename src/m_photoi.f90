@@ -21,9 +21,9 @@ contains
     use m_gas
     use m_units_constants
     use m_config
-    type(CFG_t), intent(in) :: cfg
-    integer                 :: t_size, t_size_2
-    real(dp)                :: frac_O2, temp_vec(2)
+    type(CFG_t), intent(inout) :: cfg
+    integer                    :: t_size, t_size_2
+    real(dp)                   :: frac_O2, temp_vec(2)
 
     frac_O2 = GAS_get_fraction("O2")
     if (frac_O2 <= epsilon(1.0_dp)) then
@@ -71,10 +71,10 @@ contains
 
     do n = 1, n_photons
        ! Select random direction and absorption length
-       en_frac  = pi_rng%uni_01()
-       fly_len  = -log(1.0_dp - pi_rng%uni_01()) / get_photoi_lambda(en_frac)
-       psi      = 2 * UC_pi * pi_rng%uni_01()
-       chi      = acos(1.0_dp - 2 * pi_rng%uni_01())
+       en_frac  = pi_rng%unif_01()
+       fly_len  = -log(1.0_dp - pi_rng%unif_01()) / get_photoi_lambda(en_frac)
+       psi      = 2 * UC_pi * pi_rng%unif_01()
+       chi      = acos(1.0_dp - 2 * pi_rng%unif_01())
 
        x_end(1) = my_part%x(1) + fly_len * sin(chi) * cos(psi)
        x_end(2) = my_part%x(2) + fly_len * sin(chi) * sin(psi)

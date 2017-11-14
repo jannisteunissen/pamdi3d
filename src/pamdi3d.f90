@@ -34,6 +34,7 @@ program pamdi3d
 
   implicit none
   integer, parameter             :: dp = kind(0.0d0)
+  integer, parameter             :: i8 = selected_int_kind(18)
   character(LEN=100)             :: tmp_name, sim_name, cfg_name
   character(LEN=100)             :: filename, prev_name
 
@@ -47,6 +48,7 @@ program pamdi3d
   integer                        :: n_part_sum, n_part_sum_prev
   integer                        :: ierr, myrank, ntasks, root = 0, ix, n_its
   integer                        :: rng_seed(4)
+  integer(i8)                    :: seed_8byte(2)
 
   logical                        :: finished, flag_output, rescale, adapt_grid
   logical                        :: use_detach, use_photoi, limit_dens
@@ -101,7 +103,7 @@ program pamdi3d
 
   ! Set rng seed (note: particle model has its own rng)
   call CFG_get(cfg, "rng_seed", rng_seed)
-  call rng%set_seed(rng_seed)
+  call rng%set_seed(transfer(rng_seed, seed_8byte))
 
   ! Read in the crossection data from files
   call CFG_get_size(cfg, "gas_names", n_gas_comp)
@@ -187,7 +189,7 @@ program pamdi3d
   if (PD_use_elec) call E_readjust_elec_new_grid(myrank, root, &
        sim_time, n_its)
   call E_compute_field(myrank, root, sim_time)
-  call pc%set_accel(E_get_accel_part)
+  call pc%set_accel()
 
   ! Initial values
   finished        = .false.
@@ -239,7 +241,7 @@ program pamdi3d
      sim_time       = sim_time + dt
 
      call pc%advance(dt)
-     call pc%correct_new_accel(dt, E_get_accel_part)
+     call PC_verlet_correct_accel(pc, dt)
 
      if (steps_left_fld <= 0) then
         n_part_sum = PP_get_num_sim_part(pc)
@@ -255,7 +257,7 @@ program pamdi3d
         call E_compute_field(myrank, root, sim_time)
         call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.false.)
         if (myrank == root) print *, "Field error", fld_err
-        call pc%set_accel(E_get_accel_part)
+        call pc%set_accel()
 
         ! Redistribute the particles
         call PP_share_mpi(pc, myrank, ntasks)
@@ -335,7 +337,7 @@ program pamdi3d
 
            if (myrank == root) print *, "Fld error due to rescaling:", fld_err
 
-           call pc%set_accel(E_get_accel_part)
+           call pc%set_accel()
 
            ! Redistribute the particles
            call PP_share_mpi(pc, myrank, ntasks)
@@ -419,12 +421,16 @@ contains
          "Increase refinement area by this size")
     call CFG_add(cfg, "ref_min_grid_separation", 2, &
          "The minimum distance between grids at the same level")
-    CALL CFG_add(cfg, "ref_delta_values",  (/2.0d-6,   3.0d-6,  5.0d-6,  1.0d-5,  1.0d-4,  1.0d-3/), &
-         & "List of spatial stepsizes for the electric fields in ref_EfieldValues", dyn_size = .true.)
-    CALL CFG_add(cfg, "ref_max_efield_at_delta", (/3.0d7,    2.0d7,   1.5d7,   1.0d7,   3.0d6,   0.0d0/), &
-         & "List of electric field values at which we specify the max. spatial stepsize", dyn_size = .true.)
+    call CFG_add(cfg, "ref_delta_values",  &
+         (/2.0d-6,   3.0d-6,  5.0d-6,  1.0d-5,  1.0d-4,  1.0d-3/), &
+         "List of spatial stepsizes for the electric fields in ref_EfieldValues", &
+         dynamic_size = .true.)
+    call CFG_add(cfg, "ref_max_efield_at_delta", &
+         (/3.0d7,    2.0d7,   1.5d7,   1.0d7,   3.0d6,   0.0d0/), &
+         "List of electric field values at which we specify the max. spatial stepsize", &
+         dynamic_size = .true.)
     CALL CFG_add(cfg, "ref_min_elec_dens",  1.0d15, &
-         & "Minimum electron density for considering refining in a region")
+         "Minimum electron density for considering refining in a region")
 
     !! Gas parameters
     call CFG_add(cfg, "gas_pressure", 1.0D0, &
@@ -432,17 +438,21 @@ contains
     call CFG_add(cfg, "gas_temperature", 293.0D0, &
          "The gas temperature (Kelvin)")
     CALL CFG_add(cfg, "gas_names", (/"N2"/), &
-         & "The names of the gases used in the simulation", dyn_size = .true.)
+         & "The names of the gases used in the simulation", dynamic_size = .true.)
     CALL CFG_add(cfg, "gas_files", (/"cs_example.txt"/), &
-         & "The files in which to find cross section data for each gas", dyn_size = .true.)
+         & "The files in which to find cross section data for each gas", &
+         dynamic_size = .true.)
     CALL CFG_add(cfg, "gas_fractions", (/1.0_dp /), &
-         & "The partial pressure of the gases (as if they were ideal gases)", dyn_size = .true.)
+         "The partial pressure of the gases (as if they were ideal gases)", &
+         dynamic_size = .true.)
 
     ! Electric field parameters
     CALL CFG_add(cfg, "sim_efield_values", (/-7.0D6/), &
-         "A list of values of the electric field applied in the z-direction", dyn_size = .true.)
+         "A list of values of the electric field applied in the z-direction", &
+         dynamic_size = .true.)
     CALL CFG_add(cfg, "sim_efield_times", (/0.0D0/), &
-         "The times (in increasing order) at which the values of the applied electric field are used", dyn_size = .true.)
+         "The times (in increasing order) at which the values of the applied electric field are used", &
+         dynamic_size = .true.)
     CALL CFG_add(cfg, "sim_constant_efield", .false., &
          & "Whether the electric field is constant in space and time (no space charge effect)")
 

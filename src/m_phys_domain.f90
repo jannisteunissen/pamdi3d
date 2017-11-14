@@ -16,7 +16,7 @@ contains
 
   subroutine PD_set(cfg)
     use m_config
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(inout) :: cfg
     call CFG_get(cfg, "grid_size", PD_size)
     call CFG_get(cfg, "grid_delta", PD_dr)
     call CFG_get(cfg, "elec_enabled", PD_use_elec)

@@ -34,17 +34,17 @@ contains
     use m_particle_core
     use m_particle
     class(PC_t), intent(inout) :: pc
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(inout) :: cfg
     type(RNG_t), intent(inout) :: rng
-    character(LEN=40)      :: initCond
-    logical                :: success
-    integer                :: ll, ix
-    integer                :: nBackgroundPairs
-    real(dp) :: init_weight
-    real(dp)               :: radius, nIonPairs
-    real(dp)               :: temp
-    real(dp)               :: backgroundDensity, bgO2MinDensity
-    real(dp), dimension(3) :: pos, initSeedPos
+    character(LEN=40)          :: initCond
+    logical                    :: success
+    integer                    :: ll, ix
+    integer                    :: nBackgroundPairs
+    real(dp)                   :: init_weight
+    real(dp)                   :: radius, nIonPairs
+    real(dp)                   :: temp
+    real(dp)                   :: backgroundDensity, bgO2MinDensity
+    real(dp), dimension(3)     :: pos, initSeedPos
 
     ! Laser line
     real(dp)               :: orthVec1(3), orthVec2(3), lineLen, minFac, &
@@ -63,7 +63,7 @@ contains
     nBackgroundPairs = nint(backgroundDensity * product(PD_r_max))
     print *, "Background density creates:", nBackgroundPairs
     do ll = 1, nBackgroundPairs
-       pos = (/rng%uni_01(), rng%uni_01(), rng%uni_01()/)
+       pos = (/rng%unif_01(), rng%unif_01(), rng%unif_01()/)
        pos = pos * PD_r_max
        if (.not. PD_outside_domain(pos)) call PM_create_ei_pair(pc, pos)
     end do
@@ -161,10 +161,10 @@ contains
        print *, orthVec1, orthVec2
 
        do ll = 1, nint(nIonPairs/init_weight)
-          pos = (rng%uni_01() * (maxFac-minFac) + minFac) * lineDirection + lineBase
+          pos = (rng%unif_01() * (maxFac-minFac) + minFac) * lineDirection + lineBase
           pos = pos * PD_r_max
-          pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec1
-          pos = pos + (rng%uni_01()-0.5d0) * radius * orthVec2
+          pos = pos + (rng%unif_01()-0.5d0) * radius * orthVec1
+          pos = pos + (rng%unif_01()-0.5d0) * radius * orthVec2
           !                print *, ll, pos
           if (.not. PD_outside_domain(pos)) call PM_create_ei_pair(pc, pos, w=init_weight)
        end do

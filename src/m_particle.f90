@@ -43,10 +43,11 @@ contains
     use m_cross_sec
     use m_config
     use m_phys_domain
+    use m_efield_amr
     class(PC_t), intent(inout) :: pc
-    type(CS_t), intent(in)    :: cross_secs(:)
-    type(CFG_t), intent(in)   :: cfg
-    integer, intent(in)       :: myrank, ntasks
+    type(CS_t), intent(in)     :: cross_secs(:)
+    type(CFG_t), intent(inout) :: cfg
+    integer, intent(in)        :: myrank, ntasks
 
     integer                   :: n_part_max, part_per_task, tbl_size
     real(dp)                  :: max_ev
@@ -61,10 +62,20 @@ contains
     call CFG_get(cfg, "photoi_enabled", PM_use_photoi)
 
     part_per_task = n_part_max / ntasks
+
     call pc%initialize(UC_elec_mass, cross_secs, tbl_size, &
          max_ev, part_per_task)
-    call pc%set_coll_callback(coll_callback)
-    call pc%set_outside_check(outside_check)
+
+    deallocate(pc%ionization_callbacks)
+    allocate(pc%ionization_callbacks(1))
+    pc%ionization_callbacks(1)%ptr => ionization_callback
+
+    deallocate(pc%attachment_callbacks)
+    allocate(pc%attachment_callbacks(1))
+    pc%attachment_callbacks(1)%ptr => attachment_callback
+
+    pc%outside_check => outside_check
+    pc%accel_function => E_get_accel_part
 
     PM_binner%n_bins = 5000
     PM_binner%inv_dx = (PM_binner%n_bins-1) / PD_r_max(1)
@@ -72,36 +83,39 @@ contains
          (storage_size(temp_part) / 2.0_dp**33) * n_part_max, "GB"
   end subroutine PM_initialize
 
-  subroutine coll_callback(pc, my_part, c_ix, c_type)
-    use m_cross_sec
+  subroutine ionization_callback(pc, my_part, c_ix, c_type)
     use m_efield_amr
     use m_photoi
     use m_phys_domain
     class(PC_t), intent(inout)  :: pc
     type(PC_part_t), intent(in) :: my_part
     integer, intent(in)         :: c_ix, c_type
-    integer :: n, n_photons
-    real(dp), allocatable :: photons(:,:)
+    integer                     :: n, n_photons
+    real(dp), allocatable       :: photons(:,:)
 
-    select case (c_type)
-    case (CS_ionize_t)
-       call E_add_to_var(E_i_pion, my_part%x, my_part%w)
-       call E_add_to_var(E_i_gamma, my_part%x, my_part%w)
+    call E_add_to_var(E_i_pion, my_part%x, my_part%w)
+    call E_add_to_var(E_i_gamma, my_part%x, my_part%w)
 
-       if (PM_use_photoi) then
-          call pi_from_ionization(my_part, photons)
+    if (PM_use_photoi) then
+       call pi_from_ionization(my_part, photons)
 
-          n_photons = size(photons, 2)
-          do n = 1, n_photons
-             if (.not. PD_outside_domain(photons(:, n))) &
-                  call PM_create_ei_pair(pc, photons(:, n))
-          end do
-       end if
+       n_photons = size(photons, 2)
+       do n = 1, n_photons
+          if (.not. PD_outside_domain(photons(:, n))) &
+               call PM_create_ei_pair(pc, photons(:, n))
+       end do
+    end if
+  end subroutine ionization_callback
 
-    case (CS_attach_t)
-       call E_add_to_var(E_i_O2m, my_part%x, my_part%w)
-    end select
-  end subroutine coll_callback
+  subroutine attachment_callback(pc, my_part, c_ix, c_type)
+    use m_efield_amr
+    use m_phys_domain
+    class(PC_t), intent(inout)  :: pc
+    type(PC_part_t), intent(in) :: my_part
+    integer, intent(in)         :: c_ix, c_type
+
+    call E_add_to_var(E_i_O2m, my_part%x, my_part%w)
+  end subroutine attachment_callback
 
   logical function outside_check(my_part)
     use m_phys_domain
@@ -128,7 +142,7 @@ contains
   subroutine PM_adjust_weights(pc)
     class(PC_t), intent(inout) :: pc
     call pc%merge_and_split((/.true., .true., .true./), PM_v_rel_weight, &
-         .true., weight_func, PC_merge_part_rxv, split_part)
+         .true., weight_func, 1.0e10_dp, PC_merge_part_rxv, split_part)
   end subroutine PM_adjust_weights
 
   function weight_func(my_part) result(weight)
@@ -174,7 +188,7 @@ contains
 
           do i = 1, n_samples
              ! Randomly select a particle
-             n = rng%int_ab(1, pc%n_part)
+             n = floor(rng%unif_01() * pc%n_part) + 1
              pos_samples(:,i) = pc%particles(n)%x
              fld_samples(:,i) = E_get_field(pos_samples(:,i))
           end do
@@ -234,7 +248,7 @@ contains
     if (pc%n_part > 0) then
        ! Estimate maximum velocity of particles
        do n = 1, n_samples
-          ix = rng%int_ab(1, pc%n_part)
+          ix = floor(rng%unif_01() * pc%n_part) + 1
           velocities(n) = norm2(pc%particles(ix)%v)
        end do
 
@@ -288,7 +302,7 @@ contains
        if (local_dens > max_dens) then
           convert_prob = 1 - max_dens / local_dens
           convert_prob = convert_prob * convert_frac
-          if (rng%uni_01() < convert_prob) then
+          if (rng%unif_01() < convert_prob) then
              call E_add_to_var(E_i_nion, pc%particles(ll)%x, &
                   dble(pc%particles(ll)%w))
              call pc%remove_part(ll)
@@ -321,8 +335,8 @@ contains
        part_out(ix)   = part_a
        part_out(ix)%w = part_a%w / n_part_out
        part_out(ix)%x = part_out(ix)%x + &
-            (/rng%uni_ab(-0.5_dp, 0.5_dp), rng%uni_ab(-0.5_dp, 0.5_dp), &
-            rng%uni_ab(-0.5_dp, 0.5_dp)/) * diff_dr
+            (/rng%unif_01() - 0.5_dp, rng%unif_01() - 0.5_dp, &
+            rng%unif_01() - 0.5_dp/) * diff_dr
     end do
   end subroutine split_part
 

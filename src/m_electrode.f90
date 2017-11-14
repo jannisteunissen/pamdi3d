@@ -44,7 +44,7 @@ contains
   subroutine EL_initialize(cfg, rng, r_max, myrank, root)
     use m_config
     use m_random
-    type(CFG_t), intent(in)    :: cfg
+    type(CFG_t), intent(inout) :: cfg
     type(RNG_t), intent(inout) :: rng
     integer, intent(in)        :: myrank, root
     real(dp), intent(in)       :: r_max(3)
@@ -165,7 +165,7 @@ contains
     do while (height < EL_topZ)
        radius      = EL_getRadius(height)
        ix          = ix + 1
-       randAngle   = rng%uni_01() * 2.0d0 * UC_pi
+       randAngle   = rng%unif_01() * 2.0d0 * UC_pi
        do iy = 1, nHorizontal(ix)
           xPos = radius * cos(randAngle + dble(iy-1) * 2.0D0 * UC_pi / nHorizontal(ix))
           yPos = radius * sin(randAngle + dble(iy-1) * 2.0D0 * UC_pi / nHorizontal(ix))
