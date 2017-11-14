@@ -43,7 +43,6 @@ program pamdi3d
   integer                        :: n_gas_comp
   integer                        :: step_cntr, steps_left_fld
   integer                        :: n_output, n_grid_adapt
-  integer                        :: WCTime_start, WCTime_current
   integer                        :: n_part_rescale
   integer                        :: n_part_sum, n_part_sum_prev
   integer                        :: ierr, myrank, ntasks, root = 0, ix, n_its
@@ -52,6 +51,7 @@ program pamdi3d
 
   logical                        :: finished, flag_output, rescale, adapt_grid
   logical                        :: use_detach, use_photoi, limit_dens
+  logical                        :: show_debug
 
   real(dp)                       :: max_ev
 
@@ -62,16 +62,18 @@ program pamdi3d
   type(CS_t), allocatable        :: cross_secs(:)
 
   ! Simulation variables
-  real(dp)                       :: sim_time, end_time
-  real(dp)                       :: time_per_output, time_per_grid_adapt
-  real(dp)                       :: dt_fld, min_incr_rescale, prev_fld_time
-  real(dp)                       :: fld_err
-  real(dp)                       :: max_fld_err
-  real(dp)                       :: n_elec_sum
-  real(dp)                       :: dt_min, dt_max, dt, dt_next
-  real(dp)                       :: mean_weight
-  real(dp)                       :: cfl_num
-  real(dp)                       :: max_density
+  real(dp) :: sim_time, end_time
+  real(dp) :: time_last_print, time_between_print
+  real(dp) :: time_start, current_time, wc_time
+  real(dp) :: time_per_output, time_per_grid_adapt
+  real(dp) :: dt_fld, min_incr_rescale, prev_fld_time
+  real(dp) :: fld_err
+  real(dp) :: max_fld_err
+  real(dp) :: n_elec_sum
+  real(dp) :: dt_min, dt_max, dt, dt_next
+  real(dp) :: mean_weight
+  real(dp) :: cfl_num
+  real(dp) :: max_density
 
   type(CFG_t)                    :: cfg
   type(PC_t)                     :: pc
@@ -82,6 +84,10 @@ program pamdi3d
   call MPI_init(ierr)
   call MPI_comm_rank(MPI_COMM_WORLD, myrank, ierr)
   call MPI_comm_size(MPI_COMM_WORLD, ntasks, ierr)
+
+  time_start      = MPI_WTIME()
+  time_last_print = time_start - 1.0_dp ! Ensure a first print
+
   call create_config(cfg)
 
   sim_name = "sim"
@@ -100,6 +106,11 @@ program pamdi3d
      print *, "Starting simulation ** " // trim(sim_name) // " **"
      call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
   end if
+
+  call CFG_get(cfg, "show_debug", show_debug)
+  if (myrank /= root) show_debug = .false.
+
+  call CFG_get(cfg, "time_between_print", time_between_print)
 
   ! Set rng seed (note: particle model has its own rng)
   call CFG_get(cfg, "rng_seed", rng_seed)
@@ -132,27 +143,26 @@ program pamdi3d
 
   ! Initialize all modules that need initialization
   call PD_set(cfg)
-  if (myrank == root) print *, " ~~~ initializing electric fld module"
+  if (myrank == root) print *, "Initializing electric fld module"
   call E_initialize(cfg)
-  if (myrank == root) print *, " ~~~ initializing electrode module"
+  if (myrank == root) print *, "Initializing electrode module"
   if (PD_use_elec) call EL_initialize(cfg, rng, PD_r_max, myrank, root)
 
-  if (myrank == root) print *, " ~~~ initializing particle module"
+  if (myrank == root) print *, "Initializing particle module"
   call PM_initialize(pc, cross_secs, cfg, myrank, ntasks)
 
   call CFG_get(cfg, "photoi_enabled", use_photoi)
   call CFG_get(cfg, "sim_use_o2m_detach", use_detach)
 
-  if (myrank == root) print *, " ~~~ initializing misc module"
+  if (myrank == root) print *, "Initializing misc module"
   call MISC_initialize(cfg)
 
   if (use_photoi) then
-     if (myrank == root) print *, " ~~~ initializing photoi module"
+     if (myrank == root) print *, "Initializing photoi module"
      call pi_initialize(cfg)
   end if
 
   if (myrank == root) then
-     call system_clock(COUNT=WCTime_start)
      print *, 'Setting up initial electron/ion positions and fld'
      call IC_set_init_cond(pc, cfg, rng)
   end if
@@ -256,7 +266,7 @@ program pamdi3d
         call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.true.)
         call E_compute_field(myrank, root, sim_time)
         call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.false.)
-        if (myrank == root) print *, "Field error", fld_err
+        if (show_debug) print *, "Field error", fld_err
         call pc%set_accel()
 
         ! Redistribute the particles
@@ -311,7 +321,7 @@ program pamdi3d
            call E_share_vars((/E_i_elec/), root)
 
            if (limit_dens) then
-              if (myrank == root) print *, "Limiting density"
+              if (show_debug) print *, "Limiting density"
               call PM_limit_dens(pc, rng, max_density)
            end if
 
@@ -321,8 +331,10 @@ program pamdi3d
 
            if (myrank == root) then
               mean_weight = n_elec_sum / (n_part_sum + epsilon(1.0_dp))
-              print *, step_cntr, "Rescaling particles, mean_weight:", &
-                   mean_weight, "nParticles", n_part_sum
+              if (show_debug) then
+                 print *, step_cntr, "Rescaling particles, mean_weight:", &
+                      mean_weight, "nParticles", n_part_sum
+              end if
            end if
 
            call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.true.)
@@ -335,7 +347,7 @@ program pamdi3d
            call E_compute_field(myrank, root, sim_time)
            call PM_fld_error(pc, rng, n_samples, fld_err, store_samples=.false.)
 
-           if (myrank == root) print *, "Fld error due to rescaling:", fld_err
+           if (show_debug) print *, "Fld error due to rescaling:", fld_err
 
            call pc%set_accel()
 
@@ -344,15 +356,21 @@ program pamdi3d
         end if
 
         if (myrank == root) then
-           call system_clock(COUNT=WCTime_current)
-           write(*, FMT = "(I7,A,es11.4e2,A,es11.2e2,A,es11.2e2)") &
-                n_output, "   t(s): ", sim_time, "   dt: ", dt_next, &
-                "   dtPS", dt_fld
-           write(*, FMT = "(A,es11.2e2,A,I12,A,es11.2e2,A,es11.4e2)") &
-                "       WC t(s): ", &
-                & (WCTime_current - WCTime_start)/1.0D3, "   nPart:", n_part_sum, &
-                & "  nElec: ", n_elec_sum
+           current_time=MPI_WTIME()
+           if (current_time - time_last_print > time_between_print) then
+              time_last_print = current_time
+              wc_time = current_time - time_start
+
+              write(*, FMT = "(I7,A,e11.4,A,e9.2,A,e9.2)") &
+                   n_output, "   t(s): ", sim_time, " dt: ", dt_next, &
+                   "   dtPS", dt_fld
+              write(*, FMT = "(A,e9.2,A,I12,A,e9.2,A,e11.4)") &
+                   "       WC t(s): ", wc_time, &
+                   " nPart:", n_part_sum, &
+                   & "  nElec: ", n_elec_sum
+           end if
         end if
+
         prev_fld_time = sim_time
      end if
 
@@ -391,6 +409,10 @@ contains
     type(CFG_t), intent(inout) :: cfg
 
     ! General simulation parameters
+    call CFG_add(cfg, "show_debug", .false., &
+         "Show debugging information")
+    call CFG_add(cfg, "time_between_print", 10.0_dp, &
+         "Show information every this number of seconds")
     call CFG_add(cfg, "sim_name", "mcstr", &
          "The name of the simulation")
     call CFG_add(cfg, "sim_max_fld_err", 5.0D-2, &
