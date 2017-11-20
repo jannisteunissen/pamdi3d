@@ -82,12 +82,14 @@ program test_m_particle_core
   call print_stats()
   do i = 1, n_pc
      call pmodels(i)%merge_and_split((/.false., .false., .false./), &
-          1.0e-12_dp, .true., get_weight_2, PC_merge_part_rxv, PC_split_part)
+          1.0e-12_dp, .true., get_weight_2, huge(1.0_dp), &
+          PC_merge_part_rxv, PC_split_part)
   end do
   call print_stats()
   do i = 1, n_pc
      call pmodels(i)%merge_and_split((/.false., .false., .false./), &
-          1.0e-12_dp, .true., get_weight_2, PC_merge_part_rxv, PC_split_part)
+          1.0e-12_dp, .true., get_weight_2, huge(1.0_dp), &
+          PC_merge_part_rxv, PC_split_part)
   end do
   call print_stats()
 

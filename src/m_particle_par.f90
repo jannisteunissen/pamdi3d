@@ -241,11 +241,10 @@ contains
   subroutine recv_parts_mpi(parts, sender, tag)
     use mpi
     type(PC_part_t), intent(inout) :: parts(:)
-    integer, intent(in) :: sender, tag
-
-    integer :: n_send, req_size, rel_size, ierr
-    integer :: mpi_status(MPI_STATUS_SIZE)
-    real(dp), allocatable :: r_buf(:)
+    integer, intent(in)            :: sender, tag
+    integer                        :: n_send, req_size, rel_size, ierr
+    integer                        :: status(MPI_STATUS_SIZE)
+    real(dp), allocatable          :: r_buf(:)
 
     ! We use a buffer because we cannot send the part type *neatly* with mpi
     n_send   = size(parts)
@@ -253,7 +252,7 @@ contains
     req_size = n_send * rel_size
     allocate(r_buf(req_size))
     call MPI_RECV(r_buf, req_size, MPI_DOUBLE_PRECISION, sender, tag, &
-         & MPI_COMM_WORLD, mpi_status, ierr)
+         & MPI_COMM_WORLD, status, ierr)
     parts = transfer(r_buf, parts, n_send)
   end subroutine recv_parts_mpi
 

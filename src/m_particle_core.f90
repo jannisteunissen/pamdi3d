@@ -24,40 +24,91 @@ module m_particle_core
   private
 
   integer, parameter  :: dp               = kind(0.0d0)
-  real(dp), parameter :: PC_dead_weight   = -HUGE(1.0_dp)
-  ! This has to do with openmp. It's quite interesting. Ask me about it.
+
+  !> Special weight value indicating a particle has been removed
+  real(dp), parameter :: PC_dead_weight   = -huge(1.0_dp)
+
+  !> The maximum number of collisions
+  !> \todo Consider making this a variable again (but check OpenMP performance)
   integer, parameter, public :: PC_max_num_coll = 100
 
   !> The particle type
   type, public :: PC_part_t
-     real(dp) :: x(3)   = 0
-     real(dp) :: v(3)   = 0
-     real(dp) :: a(3)   = 0
-     real(dp) :: w      = 0
-     real(dp) :: t_left = 0
+     real(dp) :: x(3)   = 0     !< Position
+     real(dp) :: v(3)   = 0     !< Velocity
+     real(dp) :: a(3)   = 0     !< Acceleration
+     real(dp) :: w      = 0     !< Weight
+     real(dp) :: t_left = 0     !< Propagation time left
   end type PC_part_t
 
-  type, public :: PC_t
-     type(PC_part_t), allocatable :: particles(:)
-     integer                      :: n_part
-     type(CS_coll_t), allocatable :: colls(:)
-     integer                      :: n_colls
-     integer, allocatable         :: ionization_colls(:)
-     integer, allocatable         :: attachment_colls(:)
-     type(LT_table_t)             :: rate_lt
-     real(dp)                     :: max_rate, inv_max_rate
-     type(LL_int_head_t)          :: clean_list
-     real(dp)                     :: mass
-     type(RNG_t)                  :: rng
-     integer                      :: separator(100)  ! Separate rng data
+  type, public :: callback_t
+     procedure(coll_callback_p), pointer, nopass :: ptr => null()
+  end type callback_t
 
-     procedure(p_to_logic_f), pointer, nopass :: outside_check => null()
-     procedure(coll_callback_p), pointer      :: coll_callback => null()
+  !> Particle core type, storing the particles and the collisions
+  type, public                    :: PC_t
+     !> Array storing the particles
+     type(PC_part_t), allocatable :: particles(:)
+
+     !> Number of particles
+     integer                      :: n_part
+
+     !> List of collisions
+     type(CS_coll_t), allocatable :: colls(:)
+
+     !> Number of collisions
+     integer                      :: n_colls
+
+     !> Indices of ionization  collisions
+     integer, allocatable         :: ionization_colls(:)
+
+     !> Indices of attachment collisions
+     integer, allocatable         :: attachment_colls(:)
+
+     !> Lookup table with collision rates
+     type(lookup_table_t)         :: rate_lt
+     real(dp)                     :: max_rate, inv_max_rate
+
+     !> List of particles to be removed
+     type(LL_int_head_t)          :: clean_list
+
+     !> Fixed mass for the particles
+     real(dp)                     :: mass
+
+     !> State of random number generator
+     type(RNG_t)                  :: rng
+
+     !> Maximum time step for particle mover
+     real(dp)                     :: dt_max = huge(1.0_dp)
+
+     !> If assigned, call this method after moving particles, to check whether
+     !> they are outside the computational domain
+     procedure(p_to_logic_f), pointer, nopass :: outside_check  => null()
+     
+     !> If assigned, call this method after moving particles, to check whether
+     !> they are inside an object, if true, call all attachment_callbacks 
+     !> and delete particle thereafter
+     procedure(p_to_logic_f), pointer, nopass :: inside_check  => null()
+
+     !> If assigned, call this method after an ionization has occurred
+     type(callback_t), allocatable :: ionization_callbacks(:)
+
+     !> If assigned, call this method after an attachment has occurred
+     type(callback_t), allocatable :: attachment_callbacks(:)
+
+     !> If assigned, use this method as the particle mover
+     procedure(subr_mover), pointer, nopass   :: particle_mover => null()
+
+     !> The method to get particle accelerations
+     procedure(p_to_r3_f), pointer, nopass    :: accel_function => null()
+
+     ! Separate rng data for OpenMP performance
+     integer                      :: separator(100)
 
    contains
+
+     ! A list of methods
      procedure, non_overridable :: initialize
-     procedure, non_overridable :: set_coll_callback
-     procedure, non_overridable :: set_outside_check
      procedure, non_overridable :: resize_part_list
      procedure, non_overridable :: remove_particles
      procedure, non_overridable :: advance
@@ -72,7 +123,6 @@ module m_particle_core
      procedure, non_overridable :: get_num_sim_part
      procedure, non_overridable :: get_num_real_part
      procedure, non_overridable :: set_accel
-     procedure, non_overridable :: correct_new_accel
      procedure, non_overridable :: get_max_coll_rate
      procedure, non_overridable :: loop_iopart
      procedure, non_overridable :: loop_ipart
@@ -93,6 +143,9 @@ module m_particle_core
 
      procedure, non_overridable :: init_from_file
      procedure, non_overridable :: to_file
+     
+     procedure, non_overridable :: add_ionization_callback
+     procedure, non_overridable :: add_attachment_callback
   end type PC_t
 
   type, abstract, public :: PC_bin_t
@@ -102,6 +155,8 @@ module m_particle_core
   end type PC_bin_t
 
   abstract interface
+
+     !> Interface for callbacks, which may for example add particles
      subroutine coll_callback_p(self, my_part, c_ix, c_type)
        import
        class(PC_t), intent(inout)  :: self
@@ -136,6 +191,12 @@ module m_particle_core
        class(PC_bin_t), intent(in) :: binner
        type(PC_part_t), intent(in) :: my_part
      end function bin_f
+
+     subroutine subr_mover(part, dt)
+       import
+       type(PC_part_t), intent(inout) :: part
+       real(dp), intent(in)           :: dt
+     end subroutine subr_mover
   end interface
 
   ! Public procedures
@@ -145,11 +206,14 @@ module m_particle_core
   public :: PC_share
   public :: PC_reorder_by_bins
 
+  public :: PC_verlet_advance
+  public :: PC_verlet_correct_accel
+
 contains
 
   !> Initialization routine for the particle module
   subroutine initialize(self, mass, cross_secs, lookup_table_size, &
-       max_en_eV, n_part_max, rng_seed)
+       max_en_eV, n_part_max, rng_seed, particle_mover)
     use m_cross_sec
     use m_units_constants
     class(PC_t), intent(inout)    :: self
@@ -158,6 +222,9 @@ contains
     real(dp), intent(in)          :: mass, max_en_eV
     integer, intent(in)           :: n_part_max
     integer, intent(in), optional :: rng_seed(4)
+    procedure(subr_mover), optional :: particle_mover
+    integer, parameter            :: i8 = selected_int_kind(18)
+    integer(i8)                   :: rng_seed_8byte(2)
 
     if (size(cross_secs) < 1) then
        print *, "No cross sections given, will abort"
@@ -168,10 +235,24 @@ contains
     self%mass   = mass
     self%n_part = 0
 
+    ! No callbacks by default
+    if (.not. allocated(self%ionization_callbacks)) &
+         allocate(self%ionization_callbacks(0))
+
+    if (.not. allocated(self%attachment_callbacks)) &
+         allocate(self%attachment_callbacks(0))
+
     if (present(rng_seed)) then
-       call self%rng%set_seed(rng_seed)
+       rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
+       call self%rng%set_seed(rng_seed_8byte)
     else
-       call self%rng%set_seed((/1, 3, 3, 1337/))
+       call self%rng%set_seed([8972134_i8, 21384823409_i8])
+    end if
+
+    if (present(particle_mover)) then
+       self%particle_mover => particle_mover
+    else
+       self%particle_mover => PC_verlet_advance
     end if
 
     call self%set_coll_rates(cross_secs, mass, max_en_eV, lookup_table_size)
@@ -179,6 +260,66 @@ contains
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
     call get_colls_of_type(self, CS_attach_t, self%attachment_colls)
   end subroutine initialize
+  
+  !> Adds an ionization callback to current list of ionization callbacks
+  subroutine add_ionization_callback(self,new_ionization_callback_pptr)
+    class(PC_t), intent(inout)    :: self
+    procedure(coll_callback_p)    :: new_ionization_callback_pptr
+    
+    type(callback_t)              :: new_ionization_callback
+    type(callback_t), allocatable :: old_callback_list(:)
+    integer                       :: nn
+    
+    new_ionization_callback%ptr => new_ionization_callback_pptr
+    if (allocated(self%ionization_callbacks)) then
+      nn = size(self%ionization_callbacks)
+      if (nn.gt.0) then
+        allocate(old_callback_list(nn))
+        old_callback_list = self%ionization_callbacks
+        deallocate(self%ionization_callbacks)
+        allocate(self%ionization_callbacks(nn+1))
+        self%ionization_callbacks(1:nn)=old_callback_list
+        self%ionization_callbacks(nn+1)=new_ionization_callback
+      elseif (nn.eq.0) then
+        deallocate(self%ionization_callbacks)
+        allocate(self%ionization_callbacks(1))
+        self%ionization_callbacks = new_ionization_callback
+      end if
+    else
+      allocate(self%ionization_callbacks(1))
+      self%ionization_callbacks = new_ionization_callback
+    end if    
+  end subroutine add_ionization_callback
+  
+  !> Adds an attachment callback to current list of attachment callbacks
+  subroutine add_attachment_callback(self,new_attachment_callback_pptr)
+    class(PC_t), intent(inout)    :: self
+    procedure(coll_callback_p)    :: new_attachment_callback_pptr
+    
+    type(callback_t)              :: new_attachment_callback
+    type(callback_t), allocatable :: old_callback_list(:)
+    integer                       :: nn
+    
+    new_attachment_callback%ptr => new_attachment_callback_pptr
+    if (allocated(self%attachment_callbacks)) then
+      nn = size(self%attachment_callbacks)
+      if (nn.gt.0) then
+        allocate(old_callback_list(nn))
+        old_callback_list = self%attachment_callbacks
+        deallocate(self%attachment_callbacks)
+        allocate(self%attachment_callbacks(nn+1))
+        self%attachment_callbacks(1:nn)=old_callback_list
+        self%attachment_callbacks(nn+1)=new_attachment_callback
+      elseif (nn.eq.0) then
+        deallocate(self%attachment_callbacks)
+        allocate(self%attachment_callbacks(1))
+        self%attachment_callbacks = new_attachment_callback
+      end if
+    else
+      allocate(self%attachment_callbacks(1))
+      self%attachment_callbacks = new_attachment_callback
+    end if
+  end subroutine add_attachment_callback
 
   !> Initialization routine for the particle module
   subroutine init_from_file(self, param_file, lt_file, rng_seed)
@@ -187,8 +328,10 @@ contains
     character(len=*), intent(in)  :: param_file, lt_file
     integer, intent(in), optional :: rng_seed(4)
 
-    integer                      :: my_unit
-    integer                      :: n_part_max
+    integer, parameter            :: i8 = selected_int_kind(18)
+    integer(i8)                   :: rng_seed_8byte(2)
+    integer                       :: my_unit
+    integer                       :: n_part_max
 
     open(newunit=my_unit, file=trim(param_file), form='UNFORMATTED', &
          access='STREAM', status='OLD')
@@ -207,9 +350,10 @@ contains
     call LT_from_file(self%rate_lt, lt_file)
 
     if (present(rng_seed)) then
-       call self%rng%set_seed(rng_seed)
+       rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
+       call self%rng%set_seed(rng_seed_8byte)
     else
-       call self%rng%set_seed((/1, 3, 3, 1337/))
+       call self%rng%set_seed([8972134_i8, 21384823409_i8])
     end if
 
     call get_colls_of_type(self, CS_ionize_t, self%ionization_colls)
@@ -231,18 +375,6 @@ contains
 
     call LT_to_file(self%rate_lt, lt_file)
   end subroutine to_file
-
-  subroutine set_coll_callback(self, pptr)
-    class(PC_t), intent(inout) :: self
-    procedure(coll_callback_p) :: pptr
-    self%coll_callback => pptr
-  end subroutine set_coll_callback
-
-  subroutine set_outside_check(self, pptr)
-    class(PC_t), intent(inout) :: self
-    procedure(p_to_logic_f) :: pptr
-    self%outside_check => pptr
-  end subroutine set_outside_check
 
   subroutine get_colls_of_type(pc, ctype, ixs)
     class(PC_t), intent(in) :: pc
@@ -305,18 +437,37 @@ contains
     use m_cross_sec
     class(PC_t), intent(inout) :: self
     integer, intent(in)        :: ll
-    integer                    :: cIx, cType, n_part_out
+    integer                    :: cIx, cType, n, n_part_out
     real(dp)                   :: coll_time, new_vel
     integer, parameter         :: max_num_part_out = 2
     type(PC_part_t)            :: part_out(max_num_part_out)
 
     do
        ! Get the next collision time
-       coll_time = sample_coll_time(self%rng%uni_01(), self%inv_max_rate)
+       coll_time = sample_coll_time(self%rng%unif_01(), self%inv_max_rate)
+
+       ! If larger than t_left, advance the particle without a collision
        if (coll_time > self%particles(ll)%t_left) exit
 
-       ! Set x,v at the collision time
-       call advance_particle(self%particles(ll), coll_time)
+       ! Ensure we don't move the particle over more than dt_max
+       do while (coll_time > self%dt_max)
+          call self%particle_mover(self%particles(ll), self%dt_max)
+          coll_time = coll_time - self%dt_max
+       end do
+
+       ! Move particle to collision time
+       call self%particle_mover(self%particles(ll), coll_time)
+
+       if (associated(self%inside_check)) then
+          if (self%inside_check(self%particles(ll))) then
+            do n = 1, size(self%attachment_callbacks)
+               call self%attachment_callbacks(n)%ptr(self, &
+                    self%particles(ll), cIx, cType)
+            end do
+            call self%remove_part(ll)
+            go to 100
+          end if
+       end if
 
        if (associated(self%outside_check)) then
           if (self%outside_check(self%particles(ll))) then
@@ -327,19 +478,20 @@ contains
 
        new_vel = norm2(self%particles(ll)%v)
        cIx     = get_coll_index(self%rate_lt, self%n_colls, self%max_rate, &
-            new_vel, self%rng%uni_01())
+            new_vel, self%rng%unif_01())
 
        if (cIx > 0) then
           ! Perform the corresponding collision
           cType   = self%colls(cIx)%type
 
-          if (associated(self%coll_callback)) &
-               call self%coll_callback(self%particles(ll), cIx, cType)
-
           select case (cType)
           case (CS_attach_t)
              call attach_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
+             do n = 1, size(self%attachment_callbacks)
+                call self%attachment_callbacks(n)%ptr(self, &
+                     self%particles(ll), cIx, cType)
+             end do
           case (CS_elastic_t)
              call elastic_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
@@ -349,6 +501,10 @@ contains
           case (CS_ionize_t)
              call ionization_collision(self%particles(ll), part_out, &
                   n_part_out, self%colls(cIx), self%rng)
+             do n = 1, size(self%ionization_callbacks)
+                call self%ionization_callbacks(n)%ptr(self, &
+                     self%particles(ll), cIx, cType)
+             end do
           case default
              stop "Wrong collision type"
           end select
@@ -361,6 +517,7 @@ contains
           else if (n_part_out == 1) then
              self%particles(ll) = part_out(1)
           else
+             call self%check_space(self%n_part + n_part_out - 1)
              self%particles(ll) = part_out(1)
              self%particles(self%n_part+1:self%n_part+n_part_out-1) = &
                   part_out(2:n_part_out)
@@ -369,31 +526,51 @@ contains
        end if
     end do
 
-    ! Update the particle position and velocity to the next timestep
-    call advance_particle(self%particles(ll), self%particles(ll)%t_left)
+    ! Move particle to end of the time step
+    call self%particle_mover(self%particles(ll), self%particles(ll)%t_left)
+    
+    !> one final check if it is inside the object or outside the domain
+    if (associated(self%inside_check)) then
+       if (self%inside_check(self%particles(ll))) then
+         do n = 1, size(self%attachment_callbacks)
+            call self%attachment_callbacks(n)%ptr(self, &
+                 self%particles(ll), cIx, cType)
+         end do
+         call self%remove_part(ll)
+         go to 100
+       end if
+    end if
+
+    if (associated(self%outside_check)) then
+       if (self%outside_check(self%particles(ll))) then
+          call self%remove_part(ll)
+          go to 100
+       end if
+    end if
+
 100 continue
   end subroutine move_and_collide
 
   !> Returns a sample from the exponential distribution of the collision times
   ! RNG_uniform() is uniform on [0,1), but log(0) = nan, so we take 1 - RNG_uniform()
-  real(dp) function sample_coll_time(uni_01, inv_max_rate)
-    real(dp), intent(in) :: uni_01, inv_max_rate
-    sample_coll_time = -log(1 - uni_01) * inv_max_rate
+  real(dp) function sample_coll_time(unif_01, inv_max_rate)
+    real(dp), intent(in) :: unif_01, inv_max_rate
+    sample_coll_time = -log(1 - unif_01) * inv_max_rate
   end function sample_coll_time
 
   integer function get_coll_index(rate_lt, n_colls, max_rate, &
        velocity, rand_unif)
     use m_find_index
-    type(LT_table_t), intent(in) :: rate_lt
-    real(dp), intent(IN)         :: velocity, rand_unif, max_rate
-    integer, intent(in)          :: n_colls
-    real(dp)                     :: rand_rate
-    real(dp)                     :: buffer(PC_max_num_coll)
+    type(lookup_table_t), intent(in) :: rate_lt
+    real(dp), intent(IN)             :: velocity, rand_unif, max_rate
+    integer, intent(in)              :: n_colls
+    real(dp)                         :: rand_rate
+    real(dp)                         :: buffer(PC_max_num_coll)
 
     ! Fill an array with interpolated rates
     buffer(1:n_colls) = LT_get_mcol(rate_lt, velocity)
     rand_rate         = rand_unif * max_rate
-    get_coll_index    = FI_adaptive_r(buffer(1:n_colls), rand_rate)
+    get_coll_index    = find_index_adaptive(buffer(1:n_colls), rand_rate)
 
     ! If there was no collision, the index exceeds the list and is set to 0
     if (get_coll_index == n_colls+1) get_coll_index = 0
@@ -489,8 +666,8 @@ contains
 
     ! Marsaglia method for uniform sampling on sphere
     do
-       rands(1) = rng%uni_ab(-1.0_dp, 1.0_dp)
-       rands(2) = rng%uni_ab(-1.0_dp, 1.0_dp)
+       rands(1) = 2 * rng%unif_01() - 1
+       rands(2) = 2 * rng%unif_01() - 1
        sum_sq   = rands(1)**2 + rands(2)**2
        if (sum_sq <= 1) exit
     end do
@@ -501,53 +678,55 @@ contains
     part%v      = part%v * vel_norm ! Normalization
   end subroutine scatter_isotropic
 
-  !> Advance the particle position and velocity over time dt
-  subroutine advance_particle(part, dt)
+  !> Use a Verlet scheme to advance the particle position and velocity over time
+  !> dt, and update t_left.
+  subroutine PC_verlet_advance(part, dt)
     type(PC_part_t), intent(inout) :: part
-    real(dp), intent(in) :: dt
+    real(dp), intent(in)           :: dt
 
     part%x      = part%x + part%v * dt + &
          0.5_dp * part%a * dt**2
     part%v      = part%v + part%a * dt
     part%t_left = part%t_left - dt
-  end subroutine advance_particle
+  end subroutine PC_verlet_advance
 
-  subroutine set_accel(self, accel_func)
-    class(PC_t), intent(inout) :: self
-    procedure(p_to_r3_f)       :: accel_func
-    integer                    :: ll
-
-    do ll = 1, self%n_part
-       self%particles(ll)%a = accel_func(self%particles(ll))
-    end do
-  end subroutine set_accel
-
-  !> Correct particle velocities for the previous timestep of 'dt'
+  !> Perform the velocity correction of a Verlet scheme
   !!
   !! During the timestep x,v have been advanced to:
   !! x(t+1) = x(t) + v(t)*dt + 0.5*a(t)*dt^2,
   !! v(t+1) = v(t) + a(t)*dt
-  !! But the velocity at t+1 should be v(t+1) = v(t) + 0.5*(a(t) + a(t+1))*dt,
-  !! to have a second order leapfrog scheme, so here we set it to that value.
-  subroutine correct_new_accel(self, dt, accel_func)
+  !! But the velocity at t+1 should be v(t+1) = v(t) + 0.5*(a(t) + a(t+1))*dt
+  !! to have a second order scheme, which is corrected here.
+  subroutine PC_verlet_correct_accel(pc, dt)
     use m_units_constants
+    type(PC_t), intent(inout) :: pc
+    real(dp), intent(IN)      :: dt
+    integer                   :: ll
+    real(dp)                  :: new_accel(3)
+
+    if (.not. associated(pc%accel_function)) &
+         stop "particle_core error: accel_func is not set"
+
+    do ll = 1, pc%n_part
+       new_accel = pc%accel_function(pc%particles(ll))
+       pc%particles(ll)%v = pc%particles(ll)%v + &
+            0.5_dp * (new_accel - pc%particles(ll)%a) * dt
+       pc%particles(ll)%a = new_accel
+    end do
+  end subroutine PC_verlet_correct_accel
+
+  subroutine set_accel(self)
     class(PC_t), intent(inout) :: self
-    real(dp), intent(IN)       :: dt
-    procedure(p_to_r3_f)       :: accel_func
     integer                    :: ll
-    real(dp)                   :: new_accel(3)
 
     do ll = 1, self%n_part
-       new_accel = accel_func(self%particles(ll))
-       self%particles(ll)%v = self%particles(ll)%v + &
-            0.5_dp * (new_accel - self%particles(ll)%a) * dt
-       self%particles(ll)%a = new_accel
+       self%particles(ll)%a = self%accel_function(self%particles(ll))
     end do
-  end subroutine correct_new_accel
+  end subroutine set_accel
 
   subroutine clean_up(self)
     class(PC_t), intent(inout) :: self
-    integer :: ix_end, ix_clean, n_part
+    integer :: ix_end, ix_clean, n_part, i
     logical :: success
 
     do
@@ -568,11 +747,22 @@ contains
           end if
        end do
     end do
+    
+    !> Added check to spot a continuing dead particle sooner
+    if ( sum(self%particles(1:self%n_part)%w) < self%n_part ) then
+      print *, "Cleaning didn't work...."
+      do i=1,self%n_part
+        if (self%particles(i)%w<1.0d0) print *, self%particles(i)%x, self%particles(i)%w
+      end do
+      stop
+    end if
   end subroutine clean_up
 
   subroutine add_part(self, part)
     class(PC_t), intent(inout)  :: self
     type(PC_part_t), intent(in) :: part
+
+    call self%check_space(self%n_part + 1)
     self%n_part                 = self%n_part + 1
     self%particles(self%n_part) = part
   end subroutine add_part
@@ -637,7 +827,13 @@ contains
   !> Return the number of real particles
   real(dp) function get_num_real_part(self)
     class(PC_t), intent(in) :: self
-    get_num_real_part = sum(self%particles(1:self%n_part)%w)
+    integer :: i
+      get_num_real_part = sum(self%particles(1:self%n_part)%w)
+      if (get_num_real_part<self%n_part) then
+        do i=1,self%n_part
+          print *, self%particles(i)%x, self%particles(i)%w
+        end do
+      end if
   end function get_num_real_part
 
   !> Return the number of simulation particles
@@ -740,8 +936,11 @@ contains
   subroutine check_space(self, n_req)
     class(PC_t), intent(in) :: self
     integer, intent(in) :: n_req
+
     if (n_req > size(self%particles)) then
-       print *, "Particle list too small!"
+       print *, "Error: particle list too small"
+       print *, "Size of list:                 ", size(self%particles)
+       print *, "Number of particles required: ", n_req
        stop
     end if
   end subroutine check_space
@@ -894,11 +1093,11 @@ contains
   ! returns the desired weight for a particle, whereas the pptr_merge and
   ! pptr_split procedures merge and split particles.
   subroutine merge_and_split(self, x_mask, v_fac, use_v_norm, weight_func, &
-       pptr_merge, pptr_split)
+       max_merge_distance, pptr_merge, pptr_split)
     use m_mrgrnk
     use kdtree2_module
     class(PC_t), intent(inout) :: self
-    real(dp), intent(in)       :: v_fac
+    real(dp), intent(in)       :: v_fac, max_merge_distance
     logical, intent(in)        :: x_mask(3), use_v_norm
 
     interface
@@ -938,6 +1137,7 @@ contains
     integer, allocatable  :: sorted_ixs(:), coord_ixs(:)
     real(dp), allocatable :: coord_data(:, :), weight_ratios(:)
     type(PC_part_t)       :: part_out(n_part_out_max)
+    real(dp)              :: dist
 
     p_min                                    = 1
     p_max                                    = self%n_part
@@ -991,6 +1191,9 @@ contains
 
           if (already_merged(neighbor_ix)) cycle
 
+          dist = norm2(coord_data(:, ix)-coord_data(:, neighbor_ix))
+          if (dist > max_merge_distance) cycle
+
           ! Get indices in the original particle list
           o_ix = sorted_ixs(ix)
           o_nn_ix = sorted_ixs(neighbor_ix)
@@ -1030,7 +1233,7 @@ contains
     type(PC_part_t), intent(out) :: part_out
     type(RNG_t), intent(inout) :: rng
 
-    if (rng%uni_01() > part_a%w / (part_a%w + part_b%w)) then
+    if (rng%unif_01() > part_a%w / (part_a%w + part_b%w)) then
        part_out%x      = part_b%x
        part_out%v      = part_b%v
        part_out%a      = part_b%a
@@ -1153,6 +1356,8 @@ contains
 
        ! Send particles from i_max to i_min
        n_send = min(n_max - n_avg, n_avg - n_min)
+       call pcs(i_min)%check_space(n_min+n_send)
+
        pcs(i_min)%particles(n_min+1:n_min+n_send) = &
             pcs(i_max)%particles(n_max-n_send+1:n_max)
 
@@ -1220,6 +1425,7 @@ contains
           if (io /= ip) then
              ! Insert at owner
              new_loc = pcs(io)%n_part + 1
+             call pcs(io)%check_space(new_loc)
              pcs(io)%particles(new_loc) = pcs(ip)%particles(ll)
              pcs(io)%n_part = new_loc
              call remove_part(pcs(ip), ll)

@@ -4,10 +4,9 @@ FFLAGS	:= -Wall -ffpe-trap=invalid,zero,overflow -g -O2 -fopenmp \
 TESTS	:= test_m_particle_core test_m_cross_sec
 
 # Need these libraries for the tests
-BASEDIR	:= ../../
-LIBS	:= particle_core fosito
-INCDIRS := $(addprefix $(BASEDIR), $(LIBS))
-LIBDIRS := ../ $(INCDIRS)
+LIBS	:= particle_core
+INCDIRS := ../src
+LIBDIRS := ../src
 
 %.o: 	%.f90
 	$(FC) -c -o $@ $< $(FFLAGS) $(addprefix -I,$(INCDIRS))
@@ -24,3 +23,6 @@ test:	$(TESTS)
 
 clean:
 	$(RM) *.o *.mod $(TESTS)
+
+# Dependencies
+$(TESTS): ../src/libparticle_core.a
