@@ -51,10 +51,10 @@ module m_units_constants
 
 contains
 
-                                                                        ! Convert (classical) kinetic energy to velocity
+  ! Convert (classical) kinetic energy to velocity
   real(dp) function UC_en_to_vel(en, mass)
     real(dp), intent(in) :: en, mass
-    UC_en_to_vel                            = sqrt(2 * en) / mass
+    UC_en_to_vel = sqrt(2 * en / mass)
   end function UC_en_to_vel
 
   ! Convert velocity to energy
